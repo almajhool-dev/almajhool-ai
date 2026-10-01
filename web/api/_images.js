@@ -172,7 +172,7 @@ async function spaceImage(sp, prompt, seed) {
 async function pickBest(candidates, request, judgeFn) {
   const content = [{ type: "text", text:
     `User's image request (may be Arabic/Iraqi dialect): "${request}"\n` +
-    `Compare the ${candidates.length} images below. Which one follows the request most faithfully (every requested subject, detail, color, style and composition) and has the best quality and fewest defects (deformed hands/faces, garbled text, artifacts)? Answer with only the image number.` }];
+    `Compare the ${candidates.length} images below. Which one follows the request most faithfully (every requested subject, detail, color, style and composition) and has the best quality and fewest defects (deformed hands/faces, garbled text, artifacts, watermarks or logos in corners)? Answer with only the image number.` }];
   candidates.forEach((c, i) => {
     content.push({ type: "text", text: `Image ${i + 1}:` });
     content.push({ type: "image_url", image_url: { url: c.image } });
@@ -182,21 +182,38 @@ async function pickBest(candidates, request, judgeFn) {
   return n >= 1 && n <= candidates.length ? n - 1 : 0;
 }
 
-export async function bestImage(prompt, request, judgeFn) {
+async function pollinationsImage(prompt, model, seed) {
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 1500))}?width=1024&height=1024&seed=${seed}&nologo=true&model=${model}&referrer=almajhool-ai.vercel.app`;
+  const res = await fetch(url, { headers: process.env.POLLINATIONS_API_KEY ? { Authorization: `Bearer ${process.env.POLLINATIONS_API_KEY}` } : {}, signal: AbortSignal.timeout(45_000) });
+  const mime = (res.headers.get("content-type") || "").split(";")[0];
+  if (!res.ok || !mime.startsWith("image/")) throw new Error(`pollinations-${model}: HTTP ${res.status}`);
+  return { image: `data:${mime};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`, provider: `pollinations-${model}`, model: `pollinations-${model}` };
+}
+
+/**
+ * يمرر الطلب على كل نماذج الرسم المتاحة بالتوازي، ويختار Gemini الصورة الأقرب للطلب.
+ * extra: مصادر إضافية من الموقع (مثل البوابة/Workers AI) — دوال ترجع {image, provider}
+ */
+export async function bestImage(prompt, request, judgeFn, extra = []) {
   const seed = Math.floor(Math.random() * 2_000_000_000);
   const z = SPACES.find((s) => s.id === "z-image-turbo");
   const f = SPACES.find((s) => s.id === "flux-schnell");
-  // حصة GPU المجانية في Hugging Face صغيرة (≈90 ثانية لكل صورة)، فالرسم المتعدد يستهلكها أسرع.
-  // BEST_OF=1 (الافتراضي): صورة وحدة بأقوى نموذج. BEST_OF=2 أو 3: عدة نسخ ويختار Gemini الأفضل (يحتاج HF_TOKEN بحصة أكبر).
+  const jobs = [
+    spaceImage(z, prompt, seed),                    // الأقوى (حصة يومية)
+    ...extra.map((fn) => fn(prompt, seed)),         // Workers AI عبر البوابة (حصة يومية منفصلة)
+    pollinationsImage(prompt, "flux", seed + 31),   // احتياط دائم
+  ];
+  // BEST_OF=2/3: نسخ إضافية من نماذج Hugging Face (تستهلك نفس حصة GPU)
   const n = Math.max(1, Math.min(3, Number(process.env.BEST_OF) || 1));
-  const jobs = [spaceImage(z, prompt, seed), spaceImage(f, prompt, seed + 104729), spaceImage(z, prompt, seed + 7919)].slice(0, n);
+  if (n >= 2) jobs.push(spaceImage(f, prompt, seed + 104729));
+  if (n >= 3) jobs.push(spaceImage(z, prompt, seed + 7919));
   const settled = await Promise.allSettled(jobs);
-  const results = settled.filter((r) => r.status === "fulfilled").map((r) => r.value);
+  const results = settled.filter((r) => r.status === "fulfilled" && r.value?.image).map((r) => r.value);
   const errors = settled.filter((r) => r.status === "rejected").map((r) => String(r.reason?.message || r.reason).slice(0, 160));
   if (!results.length) throw new Error("best-of: no candidate succeeded: " + errors.join(" | "));
   if (results.length === 1 || !judgeFn) return { ...results[0], candidates: results.length, errors };
   try {
     const i = await pickBest(results, request || prompt, judgeFn);
-    return { ...results[i], candidates: results.length, judged: true };
-  } catch { return { ...results[0], candidates: results.length }; }
+    return { ...results[i], candidates: results.length, judged: true, errors };
+  } catch { return { ...results[0], candidates: results.length, errors }; }
 }

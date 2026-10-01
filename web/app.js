@@ -470,7 +470,7 @@ async function readSSE(res, onDelta) {
 }
 
 /** استدعاء نموذج مع بث: engine = "gw:auto" | "gw:groq" | "model:v1.1" */
-async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, temperature } = {}) {
+async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, temperature, ensemble = false } = {}) {
   let res, label;
   if (engine.startsWith("model:")) {
     const headers = { "Content-Type": "application/json" };
@@ -481,7 +481,7 @@ async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, 
   } else {
     res = await fetch("/api/chat", { method: "POST", signal, credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens, temperature }) });
+      body: JSON.stringify({ messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens, temperature, ensemble }) });
     if (res.status === 401) showLogin();
   }
   if (!res.ok) {
@@ -629,6 +629,7 @@ async function chatImage(text) {
     const item = await api("/api/image", { method: "POST", body: { prompt, model: "flux", width: 1, height: 1, negative_prompt: "blurry, low quality, watermark, deformed" } });
     content.innerHTML = `<p>تفضل 🎨</p><a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="chat-img" src="${esc(item.url)}" alt="${esc(text)}"></a>
       ${item.understood ? `<small class="muted" dir="ltr">🧠 فهمت طلبك هيج: ${esc(item.understood)}</small>` : ""}
+      ${item.provider ? `<small class="muted">🖌 رسمها: ${esc(item.provider)}${item.candidates > 1 ? ` · Gemini اختارها من ${item.candidates} صور` : ""}</small>` : ""}
       ${/(مكتوب|اكتب|كتابة|كتابه|عليها|عليه اسم|باسم|نص)/.test(text) ? `<p class="small-print" style="color:var(--amber)">⚠️ ملاحظة: نماذج الرسم المجانية ضعيفة بكتابة الحروف العربية داخل الصورة، فممكن الكتابة تطلع غلط أو بالإنجليزي. باقي التفاصيل تطلع صح.</p>` : ""}
       <p class="row"><a class="btn small" href="${esc(item.url)}?dl=1">⬇ حفظ</a> <button class="btn small" type="button" data-share="${esc(item.url)}">🔗 مشاركة</button></p>`;
     currentChat.messages.push({ role: "assistant", content: `![${text}](${item.url})`, meta: "صورة · FLUX" });
@@ -696,8 +697,9 @@ async function sendChat(text) {
     const sys = { role: "system", content: MODES[currentChat.mode] || MODES.general };
     const history = currentChat.messages.slice(-24).map(({ role, content }) => ({ role, content }));
     let raf = 0;
+    content.innerHTML = '<span class="muted">🧠 أسأل عدة نماذج وأجمع أفضل جواب…</span> <span class="typing"></span>';
     const r = await llmStream([sys, ...history], engine, {
-      maxTokens: 8192, signal: chatAbort.signal,
+      maxTokens: 8192, signal: chatAbort.signal, ensemble: engine === "gw:auto",
       onDelta: (t, _p, thinking) => {
         partial = t;
         if (raf) return;
