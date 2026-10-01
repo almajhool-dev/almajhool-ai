@@ -1,0 +1,10 @@
+{
+  "name": "almajhool-ai-web",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@neondatabase/auth": "0.5.0-beta",
+    "@neondatabase/serverless": "^1.0.0"
+  }
+}

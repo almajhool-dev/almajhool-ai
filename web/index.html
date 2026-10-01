@@ -9,10 +9,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%2305070d'/><path d='M14 44 32 14l18 30H38l-6-11-6 11z' fill='%2300f0ff'/></svg>">
 </head>
-<body>
+<body class="booting">
 <div class="grid-bg" aria-hidden="true"></div>
+
+
 
 <header class="topbar">
   <div class="brand">
@@ -24,35 +28,66 @@
   </div>
   <div class="conn">
     <span class="usage-chip" id="usage-chip" title="التوكنات المستهلكة اليوم">⚡ 0</span>
-    <span class="dot" id="dot-engine" title="المحرك (الباكند)"></span><span class="conn-name">المحرك</span>
-    <span class="dot" id="dot-gateway" title="البوابة المجانية"></span><span class="conn-name">البوابة</span>
+    <span class="dot admin-only-inline" id="dot-engine" title="المحرك (التدريب)"></span>
+    <span class="dot" id="dot-gateway" title="الذكاء الاصطناعي"></span>
+    <div class="acct">
+      <button class="acct-btn" id="acct-btn" type="button" aria-label="الحساب"><img id="acct-avatar" alt="" src="icon-192.png"></button>
+      <div class="acct-menu" id="acct-menu" hidden>
+        <b id="acct-name"></b><small class="muted" id="acct-email"></small>
+        <span class="badge b-cyan" id="acct-role"></span>
+        <button class="btn small danger" id="btn-logout" type="button">تسجيل الخروج</button>
+      </div>
+    </div>
   </div>
 </header>
 
+<!-- ====================== شاشة الدخول ====================== -->
+<section class="login-screen" id="login-screen">
+  <div class="login-card">
+    <div class="login-logo" aria-hidden="true">◢◣</div>
+    <h1>المبرمج المجهول <span class="neon">AI</span></h1>
+    <p class="login-sub">منصة ذكاء اصطناعي عربية: دردشة ذكية، توليد صور، وبناء مواقع وتطبيقات تُنشر برابط حقيقي خلال دقيقة.</p>
+    <ul class="login-feats">
+      <li>✦ دردشة بأوضاع خبراء: مبرمج، أمن سيبراني، محتوى، مترجم</li>
+      <li>◈ صور بجودة عالية تُحفظ في حسابك</li>
+      <li>⌘ ابنِ موقعًا أو تطبيقًا بوصف واحد وانشره فورًا</li>
+    </ul>
+    <button class="btn google-btn" id="btn-google" type="button">
+      <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      <span>المتابعة باستخدام Google</span>
+    </button>
+    <small class="muted">بتسجيل الدخول توافق على استخدام المنصة بشكل مسؤول.</small>
+  </div>
+</section>
+
 <nav class="tabs" id="tabs">
-  <button data-tab="dashboard" class="active"><i>▣</i><span>اللوحة</span></button>
-  <button data-tab="data"><i>⛁</i><span>البيانات</span></button>
-  <button data-tab="train"><i>⚙</i><span>التدريب</span></button>
-  <button data-tab="chat"><i>✦</i><span>الدردشة</span></button>
+  <button data-tab="chat" class="active"><i>✦</i><span>الدردشة</span></button>
   <button data-tab="image"><i>◈</i><span>الصور</span></button>
-  <button data-tab="builder"><i>⌘</i><span>بناء المواقع</span></button>
-  <button data-tab="settings"><i>⚿</i><span>الإعدادات</span></button>
+  <button data-tab="builder"><i>⌘</i><span>بناء ونشر</span></button>
+  <button data-tab="dashboard"><i>▣</i><span>استهلاكي</span></button>
+  <button data-tab="admin" class="admin-only"><i>♛</i><span>الأدمن</span></button>
+  <button data-tab="data" class="admin-only"><i>⛁</i><span>البيانات</span></button>
+  <button data-tab="train" class="admin-only"><i>⚙</i><span>التدريب</span></button>
+  <button data-tab="settings" class="admin-only"><i>⚿</i><span>المحرك</span></button>
 </nav>
 
 <main>
   <!-- ====================== لوحة التحكم ====================== -->
-  <section id="tab-dashboard" class="tab active">
+  <section id="tab-dashboard" class="tab">
     <div class="notice" id="engine-offline" hidden>
       <b>المحرك غير متصل.</b> التدريب يحتاج GPU — شغّل الباكند (Colab/Kaggle/سيرفر) ثم ضع رابطه في
       <a href="#" data-goto="settings">الإعدادات</a>. الدردشة والصور وبناء المواقع تعمل الآن عبر البوابة المجانية.
     </div>
-    <div class="panel" id="gw-panel" hidden>
-      <div class="panel-head"><h2>البوابة المجانية — الاستهلاك</h2><span class="muted" id="gw-version"></span></div>
+    <div class="panel">
+      <div class="panel-head"><h2>استهلاكي اليوم</h2><span class="muted">يتجدد كل يوم</span></div>
       <div class="cards" id="usage-cards"></div>
       <div class="budget">
-        <div class="meter-top"><span>هدف اليوم: 10,000,000 توكن</span><span class="mono" id="budget-text"></span></div>
+        <div class="meter-top"><span id="budget-label"></span><span class="mono" id="budget-text"></span></div>
         <div class="bar"><span id="budget-bar" style="width:0%"></span></div>
       </div>
+    </div>
+    <div class="panel" id="provider-panel" hidden>
+      <div class="panel-head"><h2>مزودات الذكاء الاصطناعي</h2><span class="muted">تُضاف المفاتيح في Cloudflare</span></div>
       <div class="providers" id="provider-list"></div>
     </div>
     <div id="engine-dash">
@@ -214,9 +249,12 @@
             <select id="img-count"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
         </div>
         <label class="check"><input type="checkbox" id="img-translate" checked> ترجمة الوصف للإنجليزية وتحسينه تلقائيًا</label>
-        <div class="row"><button class="btn primary" type="submit" id="btn-img">✦ توليد</button>
-          <button class="btn" type="button" id="btn-clear-gallery">مسح المعرض</button></div>
+        <div class="row"><button class="btn primary" type="submit" id="btn-img">✦ توليد</button></div>
       </form>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>صوري المحفوظة</h2><span class="muted">⬇ للحفظ في الجهاز · 🔗 للمشاركة</span></div>
+      <p class="muted" id="gallery-empty" hidden>ما عندك صور بعد — ولّد أول صورة من فوق.</p>
       <div class="gallery" id="gallery"></div>
     </div>
   </section>
@@ -253,6 +291,7 @@
           <textarea id="build-prompt" rows="3" placeholder="مثال: متجر إلكتروني لبيع الإكسسوارات بثيم داكن نيون، فيه سلة مشتريات وصفحة منتج" required></textarea></label>
         <div class="wide row">
           <button class="btn primary" type="submit" id="btn-build">⌘ ابنِ</button>
+          <button class="btn publish" type="button" id="btn-publish" disabled>🚀 انشر واحصل على رابط</button>
           <button class="btn" type="button" id="btn-undo" disabled title="الإصدار السابق">↶</button>
           <button class="btn" type="button" id="btn-redo" disabled title="الإصدار التالي">↷</button>
           <button class="btn" type="button" id="btn-download" disabled>⬇ تحميل HTML</button>
@@ -262,6 +301,19 @@
         </div>
       </form>
       <div class="builder-status muted" id="build-status"></div>
+      <div class="publish-box" id="publish-box" hidden>
+        <img id="publish-qr" alt="QR" width="120" height="120">
+        <div class="publish-main">
+          <b>✓ موقعك منشور وشغّال — أي شخص يكدر يفتحه</b>
+          <input id="publish-url" readonly dir="ltr">
+          <div class="row">
+            <a class="btn small primary" id="publish-open" target="_blank" rel="noopener">فتح ↗</a>
+            <button class="btn small" id="publish-copy" type="button">⧉ نسخ الرابط</button>
+            <button class="btn small" id="publish-share" type="button">📤 مشاركة</button>
+          </div>
+          <small class="muted">📱 لتثبيته كتطبيق: افتح الرابط بالموبايل ← قائمة المتصفح ← «إضافة إلى الشاشة الرئيسية». أي تعديل بعده + «انشر» يحدّث نفس الرابط.</small>
+        </div>
+      </div>
     </div>
     <div class="panel preview-panel">
       <div class="panel-head">
@@ -271,6 +323,26 @@
       </div>
       <div class="frame-wrap"><iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe></div>
       <pre id="code-view" class="code" hidden></pre>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>مواقعي وتطبيقاتي المنشورة</h2></div>
+      <div id="my-sites"><p class="muted">…</p></div>
+    </div>
+  </section>
+
+  <!-- ====================== الأدمن ====================== -->
+  <section id="tab-admin" class="tab">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>♛ لوحة الأدمن</h2>
+        <div class="seg" id="admin-seg">
+          <button class="active" data-view="stats">الإحصاءات</button>
+          <button data-view="users">المستخدمون</button>
+          <button data-view="sites">المواقع</button>
+          <button data-view="images">الصور</button>
+        </div>
+      </div>
+      <div id="admin-body"></div>
     </div>
   </section>
 
@@ -284,18 +356,10 @@
         <label class="wide">مفتاح API (اختياري) <input id="set-engine-key" type="password" dir="ltr"></label>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h2>البوابة المجانية</h2><span class="dot" id="dot-gateway-2"></span></div>
-      <p class="muted">رابط Cloudflare Worker (مجلد <code>gateway/</code>) — يوفّر الدردشة وتوليد الصور مجانًا.</p>
-      <div class="form-grid">
-        <label class="wide">الرابط <input id="set-gw-url" placeholder="https://free-ai-gateway.xxx.workers.dev" dir="ltr"></label>
-        <label class="wide">ACCESS_TOKEN <input id="set-gw-token" type="password" dir="ltr"></label>
-      </div>
-      <div class="row"><button class="btn primary" id="btn-save">حفظ واختبار الاتصال</button></div>
-      <pre class="log" id="settings-log" hidden></pre>
-    </div>
+    <div class="panel"><div class="row"><button class="btn primary" id="btn-save">حفظ واختبار الاتصال</button></div>
+      <pre class="log" id="settings-log" hidden></pre></div>
     <div class="panel muted small-print">
-      الإعدادات تُحفظ في متصفحك فقط. لا تشارك ACCESS_TOKEN — أي شخص يملكه يستهلك حصصك.
+      رابط البوابة وكلمة سرها محفوظة على الخادم (Vercel) ولا تظهر للزوار. هذا القسم خاص بمحرك التدريب على GPU.
     </div>
   </section>
 </main>

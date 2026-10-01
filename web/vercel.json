@@ -1,0 +1,39 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?__p=:path*"
+    },
+    {
+      "source": "/i/:id",
+      "destination": "/api/file?id=:id"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
+    }
+  ],
+  "functions": {
+    "api/chat.js": {
+      "maxDuration": 300
+    },
+    "api/image.js": {
+      "maxDuration": 120
+    }
+  }
+}

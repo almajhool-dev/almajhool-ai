@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/api/s" },
+    { "source": "/:slug/manifest.json", "destination": "/api/manifest?slug=:slug" },
+    { "source": "/:slug((?!api|icon\\.png)[a-z0-9]+)", "destination": "/api/s?slug=:slug" },
+    { "source": "/:slug((?!api)[a-z0-9]+)/", "destination": "/api/s?slug=:slug" }
+  ]
+}

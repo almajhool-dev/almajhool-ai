@@ -9,10 +9,9 @@ const store = {
 const S = {
   engineUrl: store.get("engineUrl"),
   engineKey: store.get("engineKey"),
-  gwUrl: store.get("gwUrl"),
-  gwToken: store.get("gwToken"),
 };
-const state = { engineOk: false, gwOk: false, providers: [], models: [], datasets: [], runs: [], activeRun: null };
+const state = { engineOk: false, gwOk: false, me: null, providers: [], models: [], datasets: [], runs: [], activeRun: null };
+const isAdmin = () => state.me?.user?.role === "admin";
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -49,55 +48,77 @@ async function engineFetch(path, opts = {}) {
   if (!res.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
   return data;
 }
-async function gwFetch(path, body) {
-  if (!S.gwUrl) throw new Error("البوابة غير مضبوطة — أضف رابطها في الإعدادات");
-  const res = await fetch(S.gwUrl.replace(/\/$/, "") + path, {
-    method: body ? "POST" : "GET",
-    headers: { Authorization: "Bearer " + S.gwToken, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
+/** طلب إلى خادم الموقع نفسه (الجلسة عبر الكوكيز) */
+async function api(path, { method = "GET", body } = {}) {
+  const res = await fetch(path, {
+    method, credentials: "same-origin",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showLogin(); throw new Error(data.error || "سجّل الدخول أولًا"); }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
-/** استدعاء نموذج لغوي: engine = "gw:auto" | "gw:groq" | "model:v1.1" | "model:base" */
-async function llm(messages, engine, maxTokens = 2048) {
-  if (engine.startsWith("model:")) {
-    const r = await engineFetch("/v1/chat/completions", {
-      method: "POST", json: { model: engine.slice(6), messages, max_tokens: maxTokens, temperature: 0.7 },
+// ------------------------------------------------------------------ تسجيل الدخول
+const VERIFIER = "neon_auth_session_verifier";
+function showLogin() { document.body.classList.add("logged-out"); }
+async function signInGoogle() {
+  const btn = $("#btn-google"); btn.disabled = true; btn.querySelector("span").textContent = "جارٍ التحويل إلى Google…";
+  try {
+    const res = await fetch("/api/auth/sign-in/social", {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "google", callbackURL: location.origin + "/" }),
     });
-    return { text: r.choices[0].message.content, label: "نموذجي " + r.model };
-  }
-  const r = await gwFetch("/api/chat", { messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens });
-  return { text: r.text, label: `${r.provider} · ${r.model}` };
+    const j = await res.json();
+    if (!j.url) throw new Error(j.message || j.error || "تعذّر بدء تسجيل الدخول");
+    location.href = j.url;
+  } catch (e) { toast(e.message, true); btn.disabled = false; btn.querySelector("span").textContent = "المتابعة باستخدام Google"; }
 }
+async function signOut() {
+  await fetch("/api/auth/sign-out", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+  location.replace("/");
+}
+async function loadMe() {
+  // العودة من Google: نبدّل رمز التحقق بجلسة (كوكيز على نطاق موقعنا)
+  const params = new URLSearchParams(location.search);
+  if (params.has(VERIFIER)) {
+    await fetch(`/api/auth/get-session?${VERIFIER}=${encodeURIComponent(params.get(VERIFIER))}`, { credentials: "same-origin" }).catch(() => {});
+    params.delete(VERIFIER);
+    history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash);
+  }
+  const me = await fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json()).catch(() => ({ user: null }));
+  state.me = me.user ? me : null;
+  state.providers = me.providers || [];
+  state.gwOk = !!me.user && state.providers.some((p) => p.configured);
+  return state.me;
+}
+function renderAccount() {
+  const u = state.me.user;
+  document.body.classList.remove("logged-out");
+  document.body.classList.toggle("is-admin", isAdmin());
+  $("#acct-avatar").src = u.image || "icon-192.png";
+  $("#acct-name").textContent = u.name || u.email;
+  $("#acct-email").textContent = u.email;
+  $("#acct-role").textContent = isAdmin() ? "أدمن" : "مستخدم";
+  if (state.providers.some((p) => p.id === "image-sdxl")) $("#img-model").querySelector('[value="sdxl"]').disabled = false;
+  renderUsage(); renderProviders(); fillEngineSelects();
+}
+$("#btn-google").addEventListener("click", signInGoogle);
+$("#acct-btn").addEventListener("click", (e) => { e.stopPropagation(); $("#acct-menu").hidden = !$("#acct-menu").hidden; });
+document.addEventListener("click", () => { $("#acct-menu").hidden = true; });
+$("#btn-logout").addEventListener("click", signOut);
 
-async function checkConnections() {
-  // إذا كانت اللوحة مخدومة من الباكند نفسه نستخدمه تلقائيًا
-  if (!S.engineUrl && !/github\.io$|vercel\.app$/.test(location.hostname) && location.protocol.startsWith("http")) {
-    try {
-      const r = await fetch("api/health");
-      if (r.ok) { S.engineUrl = location.origin + location.pathname.replace(/\/[^/]*$/, ""); }
-    } catch { /* لا شيء */ }
-  }
-  state.engineOk = false; state.gwOk = false;
-  if (S.engineUrl) { try { await engineFetch("/api/health"); state.engineOk = true; } catch { } }
-  if (S.gwUrl) {
-    try { state.providers = await gwFetch("/api/providers"); state.gwOk = true; } catch { state.providers = []; }
-  }
+async function checkEngine() {
+  state.engineOk = false;
+  if (isAdmin() && S.engineUrl) { try { await engineFetch("/api/health"); state.engineOk = true; } catch { } }
   for (const id of ["#dot-engine", "#dot-engine-2"]) $(id).className = "dot " + (S.engineUrl ? (state.engineOk ? "on" : "off") : "");
-  for (const id of ["#dot-gateway", "#dot-gateway-2"]) $(id).className = "dot " + (S.gwUrl ? (state.gwOk ? "on" : "off") : "");
-  $("#conn-label").textContent = state.engineOk ? "المحرك متصل" : state.gwOk ? "وضع التجربة — البوابة المجانية" : "غير متصل — افتح الإعدادات";
-  $("#engine-offline").hidden = state.engineOk;
-  $("#engine-dash").hidden = !state.engineOk && state.gwOk;
-  $("#img-engine").textContent = state.gwOk ? "عبر البوابة المجانية (Cloudflare)" : "وضع احتياطي (Pollinations)";
-  if (state.gwOk) {
-    fetch(S.gwUrl + "/api/health").then((r) => r.json()).then((h) => ($("#gw-version").textContent = "v" + h.version)).catch(() => {});
-    const sdxl = state.providers.some((p) => p.id === "image-sdxl");
-    $("#img-model").querySelector('[value="sdxl"]').disabled = !sdxl;
-  }
-  renderProviders(); renderUsage();
+  $("#dot-gateway").className = "dot " + (state.gwOk ? "on" : "off");
+  $("#conn-label").textContent = state.engineOk ? "المحرك متصل" : state.gwOk ? "جاهز — الذكاء الاصطناعي متصل" : "البوابة غير متاحة حاليًا";
+  $("#engine-offline").hidden = state.engineOk || !isAdmin();
+  $("#engine-dash").hidden = !state.engineOk;
+  $("#img-engine").textContent = "الصور تُحفظ في حسابك تلقائيًا";
   await refreshModels();
   fillEngineSelects();
 }
@@ -105,14 +126,14 @@ async function checkConnections() {
 function fillEngineSelects() {
   const opts = [];
   if (state.gwOk) {
-    opts.push(["gw:auto", "البوابة المجانية — تلقائي"]);
-    for (const p of state.providers) if (p.configured && p.kind !== "image" && !p.id.endsWith("-image")) opts.push(["gw:" + p.id, `${p.id} — ${p.model}`]);
+    opts.push(["gw:auto", "⚡ تلقائي (أفضل متاح)"]);
+    for (const p of state.providers) if (p.configured && p.kind !== "image" && !p.id.startsWith("image-")) opts.push(["gw:" + p.id, `${p.id} — ${p.model}`]);
   }
   if (state.engineOk) {
     for (const m of [...state.models].reverse()) opts.push(["model:" + m.version, `نموذجي ${m.version}`]);
     opts.push(["model:base", "النموذج الأساسي (قبل التدريب)"]);
   }
-  if (!opts.length) opts.push(["", "لا يوجد محرك متصل — افتح الإعدادات"]);
+  if (!opts.length) opts.push(["gw:auto", "⚡ تلقائي"]);
   for (const sel of [$("#chat-engine"), $("#build-engine")]) {
     const cur = sel.value;
     sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
@@ -121,10 +142,16 @@ function fillEngineSelects() {
 }
 
 // ------------------------------------------------------------------ التبويبات
+const ADMIN_TABS = ["data", "train", "settings", "admin"];
 function showTab(name) {
+  if (ADMIN_TABS.includes(name) && !isAdmin()) name = "chat";
   $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
-  if (name === "dashboard" || name === "train" || name === "data") refreshAll();
+  if (["dashboard", "train", "data"].includes(name)) { refreshAll(); refreshMe(); }
+  if (name === "image") loadGallery();
+  if (name === "builder") loadMySites();
+  if (name === "admin") loadAdmin();
+  store.set("tab", name);
   window.scrollTo({ top: 0 });
 }
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -367,46 +394,38 @@ async function pollLog() {
   } catch { }
 }
 
-// ------------------------------------------------------------------ عداد التوكنات
-const today = () => new Date().toISOString().slice(0, 10);
-const usage = (() => {
-  let u = {};
-  try { u = JSON.parse(store.get("usage", "{}")) || {}; } catch { u = {}; }
-  if (u.day !== today()) u = { ...u, day: today(), today: 0, reqToday: 0, imgToday: 0 };
-  return Object.assign({ total: 0, requests: 0, images: 0, sites: 0, today: 0, reqToday: 0, imgToday: 0 }, u);
-})();
+// ------------------------------------------------------------------ الاستهلاك (من الخادم)
 const estTokens = (s) => Math.ceil(String(s || "").length / 3.2);
-function addUsage({ tokens = 0, requests = 0, images = 0, sites = 0 }) {
-  if (usage.day !== today()) Object.assign(usage, { day: today(), today: 0, reqToday: 0, imgToday: 0 });
-  usage.today += tokens; usage.total += tokens; usage.requests += requests; usage.reqToday += requests;
-  usage.images += images; usage.imgToday += images; usage.sites += sites;
-  store.set("usage", JSON.stringify(usage));
-  renderUsage();
+async function refreshMe() {
+  try {
+    const me = await fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json());
+    if (me.user) { state.me = me; state.providers = me.providers || state.providers; renderUsage(); renderProviders(); }
+  } catch { /* لا شيء */ }
 }
 function renderUsage() {
-  $("#usage-chip").textContent = "⚡ " + shortTokens(usage.today);
-  if (!$("#usage-cards")) return;
+  const me = state.me; if (!me) return;
+  const u = me.usage, L = me.limits, admin = isAdmin();
+  $("#usage-chip").textContent = "⚡ " + shortTokens(u.tokens);
   $("#usage-cards").innerHTML = [
-    card("توكنات اليوم", shortTokens(usage.today), num(usage.today)),
-    card("توكنات الكلي", shortTokens(usage.total), num(usage.total)),
-    card("طلبات اليوم", num(usage.reqToday), `${num(usage.requests)} الكلي`),
-    card("صور اليوم", num(usage.imgToday), `${num(usage.images)} الكلي`),
-    card("مواقع مبنية", num(usage.sites), ""),
-    card("المزودات النشطة", String(state.providers.filter((p) => p.configured && p.kind === "text").length), "نصية"),
+    card("توكنات اليوم", shortTokens(u.tokens), admin ? "بدون حد (أدمن)" : `من ${shortTokens(L.tokens)}`),
+    card("طلبات اليوم", num(u.requests), ""),
+    card("صور اليوم", num(u.images), admin ? "بدون حد" : `من ${L.images}`),
+    card("نشر اليوم", num(u.sites), admin ? "بدون حد" : `من ${L.sites}`),
   ].join("");
-  const pct = Math.min(100, (usage.today / 1e7) * 100);
-  $("#budget-bar").style.width = pct.toFixed(2) + "%";
-  $("#budget-text").textContent = `${num(usage.today)} / 10,000,000`;
+  const goal = admin ? 1e7 : L.tokens;
+  $("#budget-label").textContent = admin ? "هدف اليوم: 10,000,000 توكن" : `حدّك اليومي: ${num(L.tokens)} توكن`;
+  $("#budget-bar").style.width = Math.min(100, (u.tokens / goal) * 100).toFixed(2) + "%";
+  $("#budget-text").textContent = `${num(u.tokens)} / ${num(goal)}`;
 }
 // سعة يومية تقريبية لكل مزود مجاني — للعرض فقط، الأرقام الرسمية تتغير
 const CAPACITY = { cerebras: "≈1M توكن/يوم", groq: "≈200K توكن/يوم", gemini: "≈250–1500 طلب/يوم",
-  openrouter: "50 طلب/يوم (1000 مع شحن 10$)", "workers-ai": "≈10K neurons/يوم", "image-flux": "ضمن حصة Cloudflare", "image-sdxl": "ضمن حصة Cloudflare" };
+  openrouter: "50 طلب/يوم (1000 مع شحن 10$)", "workers-ai": "احتياطي مجاني من Cloudflare", "image-flux": "صور عالية الجودة", "image-sdxl": "صور بمقاسات مخصصة" };
 function renderProviders() {
-  $("#gw-panel").hidden = !state.gwOk;
-  if (!state.gwOk) return;
+  $("#provider-panel").hidden = !isAdmin();
+  if (!isAdmin()) return;
   $("#provider-list").innerHTML = state.providers.map((p) => `<div class="prov ${p.configured ? "ok" : ""}">
     <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>
-    <span class="muted mono">${esc(p.model)}</span><small class="muted">${esc(CAPACITY[p.id] || "")}${p.configured ? "" : " — أضف المفتاح لتفعيله"}</small></div>`).join("");
+    <span class="muted mono">${esc(p.model)}</span><small class="muted">${esc(CAPACITY[p.id] || "")}${p.configured ? "" : " — أضف المفتاح لتفعيله"}</small></div>`).join("") || '<p class="muted">البوابة لا ترد — تحقق من GATEWAY_URL.</p>';
 }
 
 // ------------------------------------------------------------------ البث (Streaming)
@@ -449,10 +468,10 @@ async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, 
       body: JSON.stringify({ model: engine.slice(6), messages, max_tokens: maxTokens, temperature: temperature ?? 0.7, stream: true }) });
     label = "نموذجي " + engine.slice(6);
   } else {
-    if (!S.gwUrl) throw new Error("البوابة غير مضبوطة — أضف رابطها في الإعدادات");
-    res = await fetch(S.gwUrl + "/api/chat", { method: "POST", signal,
-      headers: { Authorization: "Bearer " + S.gwToken, "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens, temperature, stream: true }) });
+    res = await fetch("/api/chat", { method: "POST", signal, credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens, temperature }) });
+    if (res.status === 401) showLogin();
   }
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
@@ -466,7 +485,7 @@ async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, 
   }
   if (!label) label = `${res.headers.get("x-provider") || "gateway"} · ${res.headers.get("x-model") || ""}`;
   const tokens = out.usage?.total_tokens || estTokens(messages.map((m) => m.content).join("")) + estTokens(out.text);
-  addUsage({ tokens, requests: 1 });
+  if (state.me) { state.me.usage.tokens += tokens; state.me.usage.requests += 1; renderUsage(); }
   return { ...out, label };
 }
 
@@ -603,33 +622,42 @@ $("#chat-text").addEventListener("keydown", (e) => {
 });
 $("#chat-text").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; });
 
-// ------------------------------------------------------------------ الصور
-const gallery = (() => { try { return JSON.parse(store.get("gallery", "[]")) || []; } catch { return []; } })();
-function saveGallery() {
-  while (gallery.length > 12) gallery.pop();
-  while (gallery.length) {
-    try { store.set("gallery", JSON.stringify(gallery)); return; } catch { gallery.pop(); }
-  }
-  store.set("gallery", "[]");
-}
+// ------------------------------------------------------------------ الصور (محفوظة في الحساب)
+let galleryLoaded = false;
 function shotEl(item) {
   const box = document.createElement("div"); box.className = "shot";
-  box.innerHTML = `<img alt="${esc(item.prompt)}" src="${item.src}" loading="lazy" style="aspect-ratio:${item.w || 1}/${item.h || 1}">
+  box.innerHTML = `<img alt="${esc(item.prompt)}" src="${item.url}" loading="lazy" style="aspect-ratio:${item.width || 1}/${item.height || 1}">
     <div class="cap"><span title="${esc(item.prompt)}">${esc(item.prompt)}</span>
-    <a href="${item.src}" download="almajhool-ai-${Date.now()}.${item.src.startsWith("data:image/png") ? "png" : "jpg"}" title="تحميل">⬇</a></div>`;
-  box.querySelector("img").addEventListener("click", () => window.open(URL.createObjectURL(dataUrlToBlob(item.src)), "_blank", "noopener"));
+      <a href="${item.url}?dl=1" title="حفظ في الجهاز">⬇</a>
+      <button type="button" class="icon-btn" data-share="${item.url}" title="مشاركة / نسخ الرابط">🔗</button>
+      <button type="button" class="icon-btn" data-del-img="${item.id}" title="حذف">🗑</button></div>`;
+  box.querySelector("img").addEventListener("click", () => window.open(item.url, "_blank", "noopener"));
   return box;
 }
-function dataUrlToBlob(u) {
-  if (!u.startsWith("data:")) return new Blob([u]);
-  const [meta, b64] = u.split(","); const bin = atob(b64); const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: meta.slice(5, meta.indexOf(";")) });
+async function loadGallery(force = false) {
+  if (galleryLoaded && !force) return;
+  try {
+    const items = await api("/api/image");
+    const g = $("#gallery"); g.innerHTML = "";
+    items.forEach((it) => g.appendChild(shotEl(it)));
+    $("#gallery-empty").hidden = items.length > 0;
+    galleryLoaded = true;
+  } catch (e) { toast(e.message, true); }
 }
-function renderGallery() { const g = $("#gallery"); g.innerHTML = ""; gallery.forEach((it) => g.appendChild(shotEl(it))); }
+document.addEventListener("click", async (e) => {
+  const sh = e.target.closest("[data-share]");
+  if (sh) {
+    const url = new URL(sh.dataset.share, location.origin).href;
+    try { if (navigator.share) await navigator.share({ url }); else { await navigator.clipboard.writeText(url); toast("تم نسخ رابط الصورة"); } } catch { }
+  }
+  const del = e.target.closest("[data-del-img]");
+  if (del && confirm("حذف الصورة نهائيًا؟")) {
+    try { await api("/api/image?id=" + del.dataset.delImg, { method: "DELETE" }); del.closest(".shot").remove(); toast("تم الحذف"); }
+    catch (err) { toast(err.message, true); }
+  }
+});
 $("#img-model").addEventListener("change", () => { $("#img-size").disabled = $("#img-model").value !== "sdxl"; });
 $("#img-size").disabled = true;
-$("#btn-clear-gallery").addEventListener("click", () => { if (confirm("مسح كل الصور من المعرض؟")) { gallery.length = 0; saveGallery(); renderGallery(); } });
 
 $("#img-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -637,34 +665,26 @@ $("#img-form").addEventListener("submit", async (e) => {
   const model = $("#img-model").value, count = +$("#img-count").value, style = $("#img-style").value;
   const [w, h] = model === "sdxl" ? $("#img-size").value.split("x").map(Number) : [1, 1];
   const btn = $("#btn-img"); btn.disabled = true;
+  $("#gallery-empty").hidden = true;
   const placeholders = Array.from({ length: count }, () => {
     const b = document.createElement("div"); b.className = "shot loading"; b.style.aspectRatio = `${w}/${h}`;
     b.innerHTML = '<span class="spinner"></span>'; $("#gallery").prepend(b); return b;
   });
   try {
-    if ($("#img-translate").checked && state.gwOk) {
+    if ($("#img-translate").checked) {
       try {
         const r = await llmStream([{ role: "system", content: "Rewrite the user's image idea as one vivid, specific English prompt for a text-to-image model (max 70 words). Keep any text the user wants written in the image in quotes. Output only the prompt." }, { role: "user", content: prompt }], "gw:auto", { maxTokens: 300 });
         if (r.text.trim()) prompt = r.text.trim().replace(/^["']|["']$/g, "");
       } catch { /* نكمل بالوصف الأصلي */ }
     }
     const full = style ? `${prompt}, ${style}` : prompt;
-    await Promise.all(placeholders.map(async (box, i) => {
+    await Promise.all(placeholders.map(async (box) => {
       try {
-        let src;
-        if (state.gwOk) {
-          src = (await gwFetch("/api/image", { prompt: full, model, width: w, height: h, negative_prompt: "blurry, low quality, watermark, deformed" })).image;
-        } else {
-          src = `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=${w > 1 ? w : 1024}&height=${h > 1 ? h : 1024}&nologo=true&seed=${Date.now() % 1e6 + i}`;
-          await new Promise((ok, bad) => { const im = new Image(); im.onload = ok; im.onerror = () => bad(new Error("تعذّر تحميل الصورة")); im.src = src; });
-        }
-        const item = { src, prompt: full, w, h, t: Date.now() };
-        gallery.unshift(item);
+        const item = await api("/api/image", { method: "POST", body: { prompt: full, model, width: w, height: h, negative_prompt: "blurry, low quality, watermark, deformed" } });
         box.replaceWith(shotEl(item));
-        addUsage({ images: 1 });
+        if (state.me) { state.me.usage.images++; renderUsage(); }
       } catch (err) { box.innerHTML = `<span class="b-red small">${esc(err.message)}</span>`; }
     }));
-    saveGallery();
   } finally { btn.disabled = false; }
 });
 
@@ -678,13 +698,13 @@ const KIND = {
 };
 const build = (() => {
   let saved = {}; try { saved = JSON.parse(store.get("build", "{}")) || {}; } catch { }
-  return { versions: saved.versions || [], idx: saved.idx ?? -1, abort: null };
+  return { versions: saved.versions || [], idx: saved.idx ?? -1, slug: saved.slug || null, abort: null };
 })();
 const currentCode = () => build.versions[build.idx]?.code || "";
 function saveBuild() {
   const keep = build.versions.slice(-8);
   const idx = Math.min(build.idx, keep.length - 1);
-  try { store.set("build", JSON.stringify({ versions: keep, idx })); } catch { try { store.set("build", JSON.stringify({ versions: keep.slice(-2), idx: Math.min(idx, 1) })); } catch { } }
+  try { store.set("build", JSON.stringify({ versions: keep, idx, slug: build.slug })); } catch { try { store.set("build", JSON.stringify({ versions: keep.slice(-2), idx: Math.min(idx, 1), slug: build.slug })); } catch { } }
 }
 function extractHtml(text) {
   const m = text.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
@@ -697,7 +717,7 @@ function setPreview() {
   const code = currentCode();
   $("#preview").srcdoc = code;
   $("#code-view").textContent = code;
-  for (const id of ["#btn-download", "#btn-copy", "#btn-newtab"]) $(id).disabled = !code;
+  for (const id of ["#btn-download", "#btn-copy", "#btn-newtab", "#btn-publish"]) $(id).disabled = !code;
   $("#btn-undo").disabled = build.idx <= 0;
   $("#btn-redo").disabled = build.idx >= build.versions.length - 1;
   $("#build-meta").textContent = code ? `${(code.length / 1024).toFixed(1)} KB · ${code.split("\n").length} سطر` : "";
@@ -708,7 +728,7 @@ function setPreview() {
 $("#build-templates").addEventListener("click", (e) => {
   const b = e.target.closest("[data-q]"); if (!b) return;
   if (currentCode() && !confirm("هذا يبدأ مشروع جديد. متأكد؟")) return;
-  build.versions = []; build.idx = -1; setPreview();
+  build.versions = []; build.idx = -1; build.slug = null; $("#publish-box").hidden = true; setPreview();
   $("#build-kind").value = b.dataset.kind; $("#build-prompt").value = b.dataset.q; $("#build-form").requestSubmit();
 });
 
@@ -757,7 +777,7 @@ Rules:
     build.versions = build.versions.slice(0, build.idx + 1);
     build.versions.push({ req, code: html, t: Date.now() });
     build.idx = build.versions.length - 1;
-    saveBuild(); setPreview(); addUsage({ sites: 1 });
+    saveBuild(); setPreview();
     $("#build-prompt").value = "";
     status.textContent = `✓ ${label}${rounds > 1 ? ` · ${rounds} أجزاء` : ""}`;
   } catch (err) {
@@ -789,34 +809,211 @@ $("#btn-newtab").addEventListener("click", () => {
 });
 $("#btn-reset").addEventListener("click", () => {
   if (currentCode() && !confirm("بدء مشروع جديد؟ الإصدارات الحالية تنمسح.")) return;
-  build.versions = []; build.idx = -1; saveBuild(); setPreview(); $("#build-status").textContent = "";
+  build.versions = []; build.idx = -1; build.slug = null; saveBuild(); setPreview(); $("#build-status").textContent = "";
+  $("#publish-box").hidden = true;
 });
 
-// ------------------------------------------------------------------ الإعدادات
+// ------------------------------------------------------------------ النشر برابط حقيقي
+function showPublished(url) {
+  $("#publish-box").hidden = false;
+  $("#publish-url").value = url;
+  $("#publish-open").href = url;
+  $("#publish-qr").src = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=" + encodeURIComponent(url);
+}
+$("#btn-publish").addEventListener("click", async () => {
+  const code = currentCode(); if (!code) return;
+  const btn = $("#btn-publish"); btn.disabled = true; btn.textContent = "⏳ جارٍ النشر…";
+  try {
+    const v = build.versions[build.idx];
+    const title = (code.match(/<title>([^<]{1,120})<\/title>/i)?.[1] || build.versions[0]?.req || "مشروعي").trim().slice(0, 120);
+    const r = await api("/api/sites", { method: "POST", body: { html: code, title, kind: $("#build-kind").value, prompt: v?.req, slug: build.slug || undefined } });
+    build.slug = r.slug; saveBuild();
+    showPublished(r.url);
+    toast(r.updated ? "تم تحديث الموقع المنشور ✓" : "تم النشر ✓ الرابط جاهز");
+    if (state.me && !r.updated) { state.me.usage.sites++; renderUsage(); }
+    loadMySites(true);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false; btn.textContent = "🚀 انشر واحصل على رابط";
+});
+$("#publish-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("#publish-url").value); toast("تم نسخ الرابط"); } catch { $("#publish-url").select(); }
+});
+$("#publish-share").addEventListener("click", async () => {
+  const url = $("#publish-url").value;
+  try { if (navigator.share) await navigator.share({ title: "موقعي", url }); else { await navigator.clipboard.writeText(url); toast("تم نسخ الرابط"); } } catch { }
+});
+let sitesLoaded = false;
+async function loadMySites(force = false) {
+  if (sitesLoaded && !force) return;
+  try {
+    const sites = await api("/api/sites");
+    sitesLoaded = true;
+    $("#my-sites").innerHTML = sites.length ? sites.map((s) => `<div class="site-row">
+      <div><b>${esc(s.title || s.slug)}</b><small class="muted mono">${esc(s.url.replace(/^https?:\/\//, ""))} · 👁 ${num(s.views)}</small></div>
+      <div class="row-actions"><a class="btn small" href="${esc(s.url)}" target="_blank" rel="noopener">فتح ↗</a>
+      <button class="btn small" data-copy="${esc(s.url)}">نسخ</button>
+      <button class="btn small danger" data-del-site="${esc(s.slug)}">🗑</button></div></div>`).join("")
+      : '<p class="muted">ما نشرت أي موقع بعد — ابنِ موقعًا واضغط «انشر».</p>';
+  } catch (e) { $("#my-sites").innerHTML = `<p class="b-red">${esc(e.message)}</p>`; }
+}
+document.addEventListener("click", async (e) => {
+  const c = e.target.closest("[data-copy]");
+  if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast("تم نسخ الرابط"); } catch { } }
+  const d = e.target.closest("[data-del-site]");
+  if (d && confirm("حذف هذا الموقع المنشور؟ الرابط سيتوقف عن العمل.")) {
+    try {
+      await api("/api/sites?slug=" + d.dataset.delSite, { method: "DELETE" });
+      if (build.slug === d.dataset.delSite) { build.slug = null; saveBuild(); $("#publish-box").hidden = true; }
+      loadMySites(true); toast("تم الحذف");
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+
+// ------------------------------------------------------------------ لوحة الأدمن
+let adminView = "stats";
+const dt = (s) => (s ? new Date(s).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—");
+async function loadAdmin(view = adminView) {
+  if (!isAdmin()) return;
+  adminView = view;
+  $$("#admin-seg button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  const box = $("#admin-body");
+  box.innerHTML = '<div class="center"><span class="spinner"></span></div>';
+  try {
+    const data = await api("/api/admin?view=" + view);
+    if (view === "stats") renderAdminStats(data);
+    if (view === "users") renderAdminUsers(data);
+    if (view === "sites") renderAdminSites(data);
+    if (view === "images") renderAdminImages(data);
+  } catch (e) { box.innerHTML = `<p class="b-red">${esc(e.message)}</p>`; }
+}
+$$("#admin-seg button").forEach((b) => b.addEventListener("click", () => loadAdmin(b.dataset.view)));
+
+function renderAdminStats({ stats: s, daily, providers }) {
+  $("#admin-body").innerHTML = `
+    <div class="cards">
+      ${card("المستخدمون", num(s.users), `${num(s.new_today)} جديد اليوم`)}
+      ${card("نشطون اليوم", num(s.active_today), "")}
+      ${card("توكنات اليوم", shortTokens(+s.tokens_today), num(s.tokens_today))}
+      ${card("توكنات الكلي", shortTokens(+s.tokens_total), num(s.tokens_total))}
+      ${card("طلبات اليوم", num(s.requests_today), "")}
+      ${card("الصور", num(s.images), `${num(s.images_today)} اليوم`)}
+      ${card("المواقع المنشورة", num(s.sites), `👁 ${num(s.site_views)} زيارة`)}
+      ${card("حجم قاعدة البيانات", bytes(+s.db_bytes), "من 512 MB مجانًا")}
+    </div>
+    <div class="budget"><div class="meter-top"><span>هدف اليوم: 10,000,000 توكن</span><span class="mono">${num(s.tokens_today)}</span></div>
+      <div class="bar"><span style="width:${Math.min(100, (s.tokens_today / 1e7) * 100).toFixed(2)}%"></span></div></div>
+    <h3 class="sub-h">التوكنات آخر 14 يوم</h3>
+    <canvas id="admin-chart" height="200"></canvas>
+    <h3 class="sub-h">المزودات (آخر 7 أيام)</h3>
+    <div class="table-wrap"><table><thead><tr><th>المزود</th><th>طلبات</th><th>توكنات</th></tr></thead><tbody>
+      ${providers.map((p) => `<tr><td class="mono">${esc(p.provider)}</td><td class="mono">${num(p.requests)}</td><td class="mono">${num(p.tokens)}</td></tr>`).join("") || '<tr><td colspan="3" class="muted">لا يوجد بعد</td></tr>'}
+    </tbody></table></div>`;
+  drawBars($("#admin-chart"), daily.map((d) => d.day), daily.map((d) => +d.tokens));
+}
+
+function drawBars(cv, labels, values) {
+  const ctx = cv.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = 200; cv.width = w * dpr; cv.height = h * dpr; ctx.scale(dpr, dpr);
+  const pad = { l: 46, r: 8, t: 10, b: 26 }; const max = Math.max(1, ...values);
+  const bw = (w - pad.l - pad.r) / values.length;
+  ctx.font = "11px Cairo, sans-serif"; ctx.fillStyle = "#7d8cab"; ctx.textAlign = "right";
+  for (let i = 0; i <= 3; i++) {
+    const v = (max * i) / 3, y = pad.t + (1 - i / 3) * (h - pad.t - pad.b);
+    ctx.fillText(shortTokens(Math.round(v)), pad.l - 6, y + 4);
+    ctx.strokeStyle = "rgba(0,240,255,.08)"; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+  }
+  values.forEach((v, i) => {
+    const bh = (v / max) * (h - pad.t - pad.b); const x = pad.l + i * bw + bw * 0.15; const y = h - pad.b - bh;
+    const g = ctx.createLinearGradient(0, y, 0, h - pad.b); g.addColorStop(0, "#00f0ff"); g.addColorStop(1, "#b026ff");
+    ctx.fillStyle = g; ctx.fillRect(x, y, bw * 0.7, Math.max(bh, v ? 2 : 0));
+    if (i % 2 === 0 || values.length < 8) { ctx.fillStyle = "#7d8cab"; ctx.textAlign = "center"; ctx.fillText(labels[i], x + bw * 0.35, h - 8); }
+  });
+}
+
+function renderAdminUsers(users) {
+  $("#admin-body").innerHTML = `<p class="muted">${num(users.length)} مستخدم — اضغط «حدود» لتغيير الحصة اليومية لأي مستخدم.</p>
+    <div class="table-wrap"><table class="admin-table"><thead><tr>
+      <th>المستخدم</th><th>الصلاحية</th><th>توكنات اليوم / الكلي</th><th>صور</th><th>مواقع</th><th>الحدود اليومية</th><th>آخر نشاط</th><th></th>
+    </tr></thead><tbody>${users.map((u) => `<tr>
+      <td><div class="user-cell"><img src="${esc(u.image || "icon-192.png")}" alt=""><div><b>${esc(u.name || "—")}</b><small class="muted">${esc(u.email)}</small></div></div></td>
+      <td>${u.role === "admin" ? '<span class="badge b-cyan">أدمن</span>' : '<span class="badge b-muted">مستخدم</span>'} ${u.banned ? '<span class="badge b-red">موقوف</span>' : ""}</td>
+      <td class="mono">${shortTokens(+u.tokens_today)} / ${shortTokens(+u.tokens_total)}</td>
+      <td class="mono">${num(u.images)}</td><td class="mono">${num(u.sites)}</td>
+      <td class="mono small-print">${shortTokens(u.daily_tokens)} · ${u.daily_images}🖼 · ${u.daily_sites}🚀</td>
+      <td class="mono small-print">${dt(u.last_seen)}</td>
+      <td class="row-actions">
+        <button class="btn small" data-act="limits" data-id="${esc(u.id)}" data-t="${u.daily_tokens}" data-i="${u.daily_images}" data-s="${u.daily_sites}">حدود</button>
+        <button class="btn small ${u.banned ? "" : "danger"}" data-act="${u.banned ? "unban" : "ban"}" data-id="${esc(u.id)}">${u.banned ? "تفعيل" : "إيقاف"}</button>
+        <button class="btn small" data-act="role" data-id="${esc(u.id)}" data-role="${u.role === "admin" ? "user" : "admin"}">${u.role === "admin" ? "إزالة أدمن" : "جعله أدمن"}</button>
+      </td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderAdminSites(sites) {
+  $("#admin-body").innerHTML = `<div class="table-wrap"><table><thead><tr><th>الموقع</th><th>صاحبه</th><th>👁</th><th>الحجم</th><th>آخر تحديث</th><th></th></tr></thead><tbody>
+    ${sites.map((s) => `<tr><td><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.slug)}</a><br><small class="muted mono">${esc(s.slug)}</small></td>
+      <td class="small-print">${esc(s.email || "—")}</td><td class="mono">${num(s.views)}</td><td class="mono">${bytes(s.size)}</td>
+      <td class="mono small-print">${dt(s.updated_at)}</td>
+      <td><button class="btn small danger" data-act="delete_site" data-slug="${esc(s.slug)}">حذف</button></td></tr>`).join("") || '<tr><td colspan="6" class="muted">لا توجد مواقع بعد</td></tr>'}
+  </tbody></table></div>`;
+}
+
+function renderAdminImages(images) {
+  $("#admin-body").innerHTML = `<div class="gallery">${images.map((i) => `<div class="shot">
+    <img src="${esc(i.url)}" alt="${esc(i.prompt)}" loading="lazy" style="aspect-ratio:${i.width || 1}/${i.height || 1}">
+    <div class="cap"><span title="${esc(i.prompt)}">${esc(i.email || "")}</span>
+      <a href="${esc(i.url)}?dl=1" title="تحميل">⬇</a>
+      <button class="icon-btn" data-act="delete_image" data-img="${esc(i.id)}" title="حذف">🗑</button></div></div>`).join("") || '<p class="muted">لا توجد صور بعد</p>'}</div>`;
+}
+
+$("#admin-body").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act; let body = { action: act };
+  if (act === "limits") {
+    const t = prompt("حد التوكنات اليومي:", b.dataset.t); if (t === null) return;
+    const i = prompt("حد الصور اليومي:", b.dataset.i); if (i === null) return;
+    const s = prompt("حد النشر اليومي:", b.dataset.s); if (s === null) return;
+    body = { ...body, user_id: b.dataset.id, tokens: +t, images: +i, sites: +s };
+  } else if (act === "ban" || act === "unban") {
+    if (act === "ban" && !confirm("إيقاف هذا المستخدم؟ لن يستطيع استخدام الموقع.")) return;
+    body.user_id = b.dataset.id;
+  } else if (act === "role") {
+    if (!confirm(b.dataset.role === "admin" ? "إعطاء صلاحية أدمن كاملة لهذا المستخدم؟" : "إزالة صلاحية الأدمن؟")) return;
+    body = { ...body, user_id: b.dataset.id, role: b.dataset.role };
+  } else if (act === "delete_site") {
+    if (!confirm("حذف هذا الموقع المنشور؟")) return; body.slug = b.dataset.slug;
+  } else if (act === "delete_image") {
+    if (!confirm("حذف هذه الصورة؟")) return; body.id = b.dataset.img;
+  }
+  try { await api("/api/admin", { method: "POST", body }); toast("تم ✓"); loadAdmin(); }
+  catch (err) { toast(err.message, true); }
+});
+
+// ------------------------------------------------------------------ الإعدادات (المحرك — للأدمن)
 $("#set-engine-url").value = S.engineUrl; $("#set-engine-key").value = S.engineKey;
-$("#set-gw-url").value = S.gwUrl; $("#set-gw-token").value = S.gwToken;
 $("#btn-save").addEventListener("click", async () => {
   S.engineUrl = $("#set-engine-url").value.trim().replace(/\/$/, "");
   S.engineKey = $("#set-engine-key").value.trim();
-  S.gwUrl = $("#set-gw-url").value.trim().replace(/\/$/, "");
-  S.gwToken = $("#set-gw-token").value.trim();
   for (const k of Object.keys(S)) store.set(k, S[k]);
   const log = $("#settings-log"); log.hidden = false; log.textContent = "جارٍ الاختبار…";
-  await checkConnections();
-  log.textContent = [
-    `Engine:  ${S.engineUrl ? (state.engineOk ? "connected ✓" : "unreachable ✗") : "not set"}`,
-    `Gateway: ${S.gwUrl ? (state.gwOk ? "connected ✓" : "unreachable / wrong token ✗") : "not set"}`,
-    ...state.providers.map((p) => `  ${p.configured ? "✓" : "✗"} ${p.id} — ${p.model}`),
-  ].join("\n");
+  await checkEngine();
+  log.textContent = `Engine: ${S.engineUrl ? (state.engineOk ? "connected ✓" : "unreachable ✗") : "not set"}`;
   refreshAll();
 });
 
 // ------------------------------------------------------------------ التشغيل
-setPreview();
-renderGallery();
-renderUsage();
-if (chats.length) { currentChat = chats[chats.length - 1]; renderChatList(); renderChat(); } else newChat();
-checkConnections().then(refreshAll);
+(async function boot() {
+  setPreview();
+  const me = await loadMe();
+  document.body.classList.remove("booting");
+  if (!me) { showLogin(); return; }
+  renderAccount();
+  if (chats.length) { currentChat = chats[chats.length - 1]; renderChatList(); renderChat(); } else newChat();
+  if (build.slug && currentCode()) loadMySites();
+  showTab(store.get("tab", "chat") || "chat");
+  await checkEngine();
+  refreshAll();
+})();
 setInterval(() => {
   const active = $(".tab.active")?.id;
   if (state.engineOk && ["tab-dashboard", "tab-train"].includes(active)) refreshAll();

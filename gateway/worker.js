@@ -4,7 +4,7 @@
 //    (تتطلب Authorization: Bearer <ACCESS_TOKEN>)
 // ترتيب التنقل التلقائي: Cerebras → Groq → Gemini → OpenRouter → Workers AI (بدون مفتاح)
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 
 const PROVIDERS = [
   { id: "cerebras", url: "https://api.cerebras.ai/v1/chat/completions", keyVar: "CEREBRAS_API_KEY",
@@ -14,7 +14,10 @@ const PROVIDERS = [
   { id: "gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     keyVar: "GEMINI_API_KEY", modelVar: "GEMINI_MODEL", defaultModel: "gemini-2.5-flash", maxOut: 65000 },
   { id: "openrouter", url: "https://openrouter.ai/api/v1/chat/completions", keyVar: "OPENROUTER_API_KEY",
-    modelVar: "OPENROUTER_MODEL", defaultModel: "openrouter/free", maxOut: 32000, usageOpt: true,
+    modelVar: "OPENROUTER_MODEL", defaultModel: "nvidia/nemotron-3-super-120b-a12b:free", maxOut: 32000, usageOpt: true,
+    // قائمة احتياطية: إذا كان النموذج الأول مشغولًا ينتقل OpenRouter للتالي تلقائيًا
+    fallbackVar: "OPENROUTER_MODELS",
+    fallbackModels: ["nvidia/nemotron-3-super-120b-a12b:free", "qwen/qwen3.8-27b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3-ultra-550b-a55b:free"],
     extraHeaders: { "HTTP-Referer": "https://almajhool-ai.vercel.app", "X-Title": "Almajhool AI" } },
 ];
 
@@ -84,6 +87,11 @@ function sanitizeMessages(messages) {
 // ------------------------------------------------------------------ مزودات متوافقة مع OpenAI
 async function callOpenAI(p, env, messages, maxTokens, stream, temperature) {
   const body = { model: env[p.modelVar] || p.defaultModel, messages, max_tokens: Math.min(maxTokens, p.maxOut) };
+  if (p.fallbackModels) {
+    const list = (env[p.fallbackVar] || "").split(",").map((x) => x.trim()).filter(Boolean);
+    body.models = (list.length ? list : p.fallbackModels).slice(0, 3); // OpenRouter يقبل 3 كحد أقصى
+    body.model = env[p.modelVar] || body.models[0];
+  }
   if (temperature != null) body.temperature = temperature;
   if (stream) {
     body.stream = true;
