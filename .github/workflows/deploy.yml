@@ -88,6 +88,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODELS: ${{ secrets.GEMINI_MODELS }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      BEST_OF: ${{ secrets.BEST_OF }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
     steps:
@@ -131,7 +132,7 @@ jobs:
           if [ "$ROOT" = "web" ]; then DIR=.; else DIR=web; fi
           cd "$DIR"
           ENVS=()
-          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN; do
+          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN BEST_OF; do
             if [ -n "${!K}" ]; then ENVS+=(-e "$K=${!K}"); echo "passing $K to the site"; fi
           done
           npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" "${ENVS[@]}"

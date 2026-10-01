@@ -1,5 +1,5 @@
 // الصور: توليد + حفظ دائم في قاعدة البيانات + قائمة صوري + حذف
-import { fallbackImage, toEnglishPrompt } from "./_images.js";
+import { bestImage, fallbackImage, toEnglishPrompt } from "./_images.js";
 import { directConfigured, directText } from "./_direct.js";
 import { HttpError, gateway, json, logUsage, randomId, requireUser, route, sql, usageToday } from "./_lib.js";
 
@@ -13,22 +13,29 @@ export const POST = route(async (request) => {
     throw new HttpError(429, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا.`);
   }
   // نماذج الصور لا تفهم العربية: نترجم ونحسّن الوصف هنا على الخادم (لا يُحسب من حد التوكنات)
-  const english = (await toEnglishPrompt(String(prompt).slice(0, 2000), async (messages) => {
-    if (directConfigured().length) {
-      try { return await directText(messages, { max_tokens: 300, temperature: 0.4 }); } catch { /* نجرب البوابة */ }
-    }
-    const r = await gateway("/api/chat", { messages, max_tokens: 300, temperature: 0.4 });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    return d.text;
-  })).slice(0, 2000);
+  const hasGemini = directConfigured().length > 0;
+  const gem = (opts) => (messages) => directText(messages, opts);
+  // 1) Gemini يفهم الطلب ويكتب وصفًا غنيًا بالتفاصيل (أو ترجمة Google إذا ما متوفر)
+  const english = (await toEnglishPrompt(String(prompt).slice(0, 2000), hasGemini
+    ? gem({ max_tokens: 600, temperature: 0.5 })
+    : async (messages) => {
+      const r = await gateway("/api/chat", { messages, max_tokens: 600, temperature: 0.5 });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      return d.text;
+    })).slice(0, 2000);
+  // 2) نرسم عدة نسخ بنماذج قوية ويختار Gemini الأقرب لطلبك
   let data = {};
-  try {
-    const r = await gateway("/api/image", { prompt: english, model, width, height, negative_prompt });
-    data = await r.json().catch(() => ({}));
-    if (!r.ok) data = { error: data.error || `HTTP ${r.status}` };
-  } catch (e) { data = { error: e.message }; }
-  // البوابة فشلت (مثلًا خلصت حصة Cloudflare اليومية 4006)؟ نولّد مباشرة من مصدر مجاني بدون مفتاح
+  try { data = await bestImage(english, String(prompt).slice(0, 1000), hasGemini ? gem({ max_tokens: 50 }) : null); }
+  catch (e) { data = { error: e.message }; }
+  // 3) احتياط: البوابة ثم باقي المصادر المجانية
+  if (!data.image) {
+    try {
+      const r = await gateway("/api/image", { prompt: english, model, width, height, negative_prompt });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.image) data = d;
+    } catch { /* نكمل */ }
+  }
   if (!data.image) {
     try { data = await fallbackImage(english.slice(0, 1500), data.error); }
     catch (e) { throw new HttpError(502, e.message); }
@@ -37,8 +44,8 @@ export const POST = route(async (request) => {
   const mime = meta.slice(5, meta.indexOf(";")) || "image/jpeg";
   const bytes = Buffer.from(b64, "base64");
   const id = randomId(12);
-  const w = data.width || (model === "sdxl" ? Number(width) || 1024 : 1024);
-  const h = data.height || (model === "sdxl" ? Number(height) || 1024 : 1024);
+  const w = data.width || (data.provider === "z-image-turbo" ? 1280 : model === "sdxl" ? Number(width) || 1024 : 1024);
+  const h = data.height || (data.provider === "z-image-turbo" ? 1280 : model === "sdxl" ? Number(height) || 1024 : 1024);
   await sql`INSERT INTO images (id, user_id, prompt, model, mime, data, width, height)
             VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${data.model || model}, ${mime}, ${bytes}, ${w}, ${h})`;
   await logUsage(user.id, "image", 0, data.provider || "workers-ai", data.model || model);
