@@ -431,7 +431,7 @@ function renderProviders() {
     const tier = p.tier === 1 ? "قوي" : p.tier === 2 ? "احتياطي" : "طوارئ";
     return `<div class="prov ${p.configured ? "ok" : ""}">
       <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>${status}
-      <small class="muted">${esc(tier)} · ${p.keyless && !p.has_key ? "بدون مفتاح · " : ""}${esc(p.cap || "")}</small>
+      <small class="muted">${esc(tier)} · ${p.keyless && !p.has_key ? "بدون مفتاح · " : ""}${p.keys > 1 ? `${num(p.keys)} مفاتيح · ` : ""}${esc(p.cap || "")}</small>
       <span class="muted mono">${esc(p.model || "")}</span>
       ${p.configured ? `<small class="muted mono">✓ ${num(st.ok || 0)} · ✗ ${num(st.fail || 0)} · ${shortTokens(st.tokens || 0)} توكن${st.last_error && st.fail ? ` · آخر خطأ: ${esc(String(st.last_error).slice(0, 60))}` : ""}</small>`
         : `<small>${p.signup ? `<a href="${esc(p.signup)}" target="_blank" rel="noopener">سجّل واحصل على المفتاح ↗</a> · ` : ""}اسم المتغير: <code>${esc(p.key_var || "")}</code></small>`}
