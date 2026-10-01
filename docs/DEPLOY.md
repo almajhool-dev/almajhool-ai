@@ -58,6 +58,8 @@ wrangler deploy
 
 **إذا تغيّرت أسماء النماذج:** ضع `<ID>_MODELS`، مثل `GITHUB_MODELS="openai/gpt-4.1,openai/gpt-4o"`.
 
+**مصادر الصور (تنتقل بينها تلقائيًا):** Workers AI (10,000 neurons يوميًا)، ثم حساب Cloudflare ثاني (`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`)، ثم Hugging Face (`HF_TOKEN`)، ثم Together (`TOGETHER_API_KEY`)، ثم Pollinations بدون مفتاح. إذا خلصت حصة مصدر اليومية، يتوقف لحد منتصف الليل UTC.
+
 مفتاح واحد يكفي للبداية. توليد الصور يعمل عبر Workers AI (FLUX) وما يحتاج مفتاح، فقط حساب Cloudflare.
 
 بعد النشر افتح اللوحة، ثم **الإعدادات ← البوابة المجانية**، وضع الرابط والـ ACCESS_TOKEN.

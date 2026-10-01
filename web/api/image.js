@@ -12,16 +12,16 @@ export const POST = route(async (request) => {
   }
   const r = await gateway("/api/image", { prompt: String(prompt).slice(0, 2000), model, width, height, negative_prompt });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok || !data.image) throw new HttpError(502, data.error || "فشل توليد الصورة");
+  if (!r.ok || !data.image) throw new HttpError(502, String(data.error || "فشل توليد الصورة").split("\n")[0]);
   const [meta, b64] = data.image.split(",");
   const mime = meta.slice(5, meta.indexOf(";")) || "image/jpeg";
   const bytes = Buffer.from(b64, "base64");
   const id = randomId(12);
-  const w = model === "sdxl" ? Number(width) || 1024 : 1024;
-  const h = model === "sdxl" ? Number(height) || 1024 : 1024;
+  const w = data.width || (model === "sdxl" ? Number(width) || 1024 : 1024);
+  const h = data.height || (model === "sdxl" ? Number(height) || 1024 : 1024);
   await sql`INSERT INTO images (id, user_id, prompt, model, mime, data, width, height)
             VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${data.model || model}, ${mime}, ${bytes}, ${w}, ${h})`;
-  await logUsage(user.id, "image", 0, "workers-ai", data.model || model);
+  await logUsage(user.id, "image", 0, data.provider || "workers-ai", data.model || model);
   return json({ id, url: `/i/${id}`, prompt, width: w, height: h, created_at: new Date().toISOString() });
 });
 

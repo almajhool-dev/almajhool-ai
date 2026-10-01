@@ -315,7 +315,7 @@ async function chat(env, { messages, provider = "auto", max_tokens = 4096, tempe
       return { provider: id, model: data.model || a.model, text, usage: data.usage, finish_reason: choice.finish_reason };
     } catch (e) {
       markFail(id, a.model, e.status || (e.name === "AbortError" ? 504 : 0), e.message, e.retryAfter, a.ki ?? -1);
-      if (id === "workers-ai") cooldown.set("workers-ai", now() + 60_000);
+      if (id === "workers-ai") cooldown.set("workers-ai", dailyExhausted(e.message) ? untilMidnightUTC() : now() + 60_000);
       errors.push(e.message.slice(0, 160));
     }
   }
@@ -330,21 +330,102 @@ function toBase64(buf) {
   return btoa(bin);
 }
 
+// مصادر الصور بالترتيب: Workers AI → حساب Cloudflare ثاني → Hugging Face → Together → Pollinations (بدون مفتاح)
+// إذا انتهت حصة مصدر (مثل 10,000 neurons اليومية) يُوقف حتى منتصف الليل UTC وننتقل للتالي تلقائيًا.
+const untilMidnightUTC = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
+const dailyExhausted = (msg) => /daily free allocation|4006|quota|exceeded your monthly|credits/i.test(String(msg || ""));
+const listOf = (v) => String(v || "").split(/[\s,]+/).filter(Boolean);
+
+async function imgBytes(res, who) {
+  if (!res.ok) { const e = new Error(`${who}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`); e.status = res.status; throw e; }
+  const mime = (res.headers.get("content-type") || "image/jpeg").split(";")[0];
+  if (!mime.startsWith("image/")) throw new Error(`${who}: not an image (${mime})`);
+  return `data:${mime};base64,${toBase64(await res.arrayBuffer())}`;
+}
+
+const IMAGE_SOURCES = [
+  { id: "workers-ai", ok: (env) => !!env.AI, async run(env, a) {
+      const m = IMAGE_MODELS[a.model] || IMAGE_MODELS.flux;
+      if (m.sizes) {
+        const out = await env.AI.run(m.id, { prompt: a.prompt, negative_prompt: a.negative_prompt || undefined, width: a.w, height: a.h });
+        const buf = out instanceof ReadableStream ? await new Response(out).arrayBuffer() : out;
+        return { image: `data:image/png;base64,${toBase64(buf)}`, model: m.id };
+      }
+      const out = await env.AI.run(m.id, { prompt: a.prompt, steps: 8, seed: a.seed });
+      if (!out?.image) throw new Error("workers-ai: empty image");
+      return { image: `data:image/jpeg;base64,${out.image}`, model: m.id };
+    } },
+  { id: "cloudflare", ok: (env) => !!env.CLOUDFLARE_API_TOKEN && !!env.CLOUDFLARE_ACCOUNT_ID, async run(env, a) {
+      // يدعم عدة حسابات: CLOUDFLARE_ACCOUNT_ID="id1,id2" و CLOUDFLARE_API_TOKEN="t1,t2" بنفس الترتيب
+      const ids = listOf(env.CLOUDFLARE_ACCOUNT_ID), toks = listOf(env.CLOUDFLARE_API_TOKEN), errs = [];
+      for (let i = 0; i < ids.length; i++) {
+        if (cooled(`img-cloudflare#${i}`)) continue;
+        const res = await fetchWithTimeout(`https://api.cloudflare.com/client/v4/accounts/${ids[i]}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+          { method: "POST", headers: { Authorization: `Bearer ${toks[i] || toks[0]}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: a.prompt, steps: 8, seed: a.seed }) }, 60_000);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data?.result?.image) return { image: `data:image/jpeg;base64,${data.result.image}`, model: "@cf/flux-1-schnell (account " + (i + 1) + ")" };
+        const msg = JSON.stringify(data.errors || data).slice(0, 200);
+        cooldown.set(`img-cloudflare#${i}`, dailyExhausted(msg) ? untilMidnightUTC() : now() + 60_000);
+        errs.push(`account ${i + 1}: ${msg}`);
+      }
+      throw new Error("cloudflare: " + (errs.join(" | ") || "all accounts cooling down"));
+    } },
+  { id: "huggingface", ok: (env) => !!env.HF_TOKEN, async run(env, a) {
+      const model = env.HF_IMAGE_MODEL || "black-forest-labs/FLUX.1-schnell", errs = [];
+      for (const [i, tok] of listOf(env.HF_TOKEN).entries()) {
+        if (cooled(`img-huggingface#${i}`)) continue;
+        try {
+          const res = await fetchWithTimeout(`https://router.huggingface.co/hf-inference/models/${model}`,
+            { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", Accept: "image/jpeg" },
+              body: JSON.stringify({ inputs: a.prompt, parameters: { width: a.w, height: a.h, seed: a.seed } }) }, 90_000);
+          return { image: await imgBytes(res, "huggingface"), model };
+        } catch (e) { cooldown.set(`img-huggingface#${i}`, now() + (e.status === 402 || dailyExhausted(e.message) ? 6 * 3600_000 : 60_000)); errs.push(e.message); }
+      }
+      throw new Error(errs.join(" | ") || "huggingface: all tokens cooling down");
+    } },
+  { id: "together", ok: (env) => !!env.TOGETHER_API_KEY, async run(env, a) {
+      const model = env.TOGETHER_IMAGE_MODEL || "black-forest-labs/FLUX.1-schnell-Free";
+      const res = await fetchWithTimeout("https://api.together.xyz/v1/images/generations",
+        { method: "POST", headers: { Authorization: `Bearer ${listOf(env.TOGETHER_API_KEY)[0]}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model, prompt: a.prompt, width: a.w, height: a.h, steps: 4, n: 1, seed: a.seed, response_format: "b64_json" }) }, 90_000);
+      const data = await res.json().catch(() => ({}));
+      const b64 = data?.data?.[0]?.b64_json;
+      if (!res.ok || !b64) { const e = new Error(`together: HTTP ${res.status} ${JSON.stringify(data).slice(0, 200)}`); e.status = res.status; throw e; }
+      return { image: `data:image/jpeg;base64,${b64}`, model };
+    } },
+  { id: "pollinations", ok: () => true, async run(env, a) {
+      const q = new URLSearchParams({ width: a.w, height: a.h, seed: a.seed, nologo: "true", model: env.POLLINATIONS_IMAGE_MODEL || "flux" });
+      const headers = env.POLLINATIONS_API_KEY ? { Authorization: `Bearer ${env.POLLINATIONS_API_KEY}` } : {};
+      const res = await fetchWithTimeout(`https://image.pollinations.ai/prompt/${encodeURIComponent(a.prompt)}?${q}`, { headers }, 90_000);
+      return { image: await imgBytes(res, "pollinations"), model: "pollinations/" + q.get("model") };
+    } },
+];
+
 async function generateImage(env, { prompt, model = "flux", width, height, negative_prompt, seed }) {
-  if (!env.AI) throw new Error("Workers AI binding (AI) is not configured");
-  const m = IMAGE_MODELS[model] || IMAGE_MODELS.flux;
   prompt = String(prompt || "").slice(0, 2000);
   if (!prompt) throw new Error("prompt required");
-  const s = Number.isInteger(seed) ? seed : Math.floor(Math.random() * 1e9);
-  if (m.sizes) {
-    const clamp = (v) => Math.max(256, Math.min(2048, Math.round((Number(v) || 1024) / 64) * 64));
-    const out = await env.AI.run(m.id, { prompt, negative_prompt: negative_prompt || undefined, width: clamp(width), height: clamp(height) });
-    const buf = out instanceof ReadableStream ? await new Response(out).arrayBuffer() : out;
-    return { image: `data:image/png;base64,${toBase64(buf)}`, model: m.id, seed: s };
+  const clamp = (v) => Math.max(256, Math.min(2048, Math.round((Number(v) || 1024) / 64) * 64));
+  const sized = IMAGE_MODELS[model]?.sizes;
+  const a = { prompt, model, negative_prompt, seed: Number.isInteger(seed) ? seed : Math.floor(Math.random() * 1e9),
+    w: sized ? clamp(width) : 1024, h: sized ? clamp(height) : 1024 };
+  const errors = [];
+  for (const src of IMAGE_SOURCES) {
+    const key = `img-${src.id}`;
+    if (!src.ok(env) || cooled(key)) continue;
+    try {
+      const r = await src.run(env, a);
+      markOk(key);
+      return { ...r, provider: src.id, seed: a.seed, width: a.w, height: a.h };
+    } catch (e) {
+      const msg = e.message || String(e);
+      stat(key).fail++; stat(key).last_error = msg.slice(0, 160);
+      // حصة يومية انتهت → نوقفه لمنتصف الليل · غير ذلك → دقيقة أو حسب Retry
+      cooldown.set(key, dailyExhausted(msg) ? untilMidnightUTC() : now() + (e.status === 429 ? 5 * 60_000 : 60_000));
+      errors.push(msg.slice(0, 200));
+    }
   }
-  const out = await env.AI.run(m.id, { prompt, steps: 8, seed: s });
-  if (!out?.image) throw new Error("Image generation returned nothing");
-  return { image: `data:image/jpeg;base64,${out.image}`, model: m.id, seed: s };
+  throw new Error("كل مصادر الصور مشغولة أو انتهت حصتها حاليًا. أضف HF_TOKEN أو حساب Cloudflare ثاني لزيادة السعة.\n" + errors.join("\n"));
 }
 
 function providersInfo(env) {
@@ -358,6 +439,7 @@ function providersInfo(env) {
     { id: "workers-ai", kind: "text", tier: 3, configured: !!env.AI, keyless: true, model: env.WORKERS_AI_MODEL || WORKERS_AI_TEXT,
       cap: "احتياطي Cloudflare (≈10K neurons/يوم)", cooldown_s: left("workers-ai"), stats: stat("workers-ai") },
     ...Object.entries(IMAGE_MODELS).map(([k, m]) => ({ id: "image-" + k, kind: "image", configured: !!env.AI, model: m.id, label: m.label, sizes: m.sizes })),
+    ...IMAGE_SOURCES.map((src) => ({ id: "img-" + src.id, kind: "image", configured: src.ok(env), cooldown_s: left("img-" + src.id), stats: stat("img-" + src.id) })),
   ];
 }
 
