@@ -24,10 +24,10 @@ jobs:
       - name: Arabic request is understood (translated to English)
         run: |
           node --input-type=module -e "
-            import { toEnglishPrompt, hasArabic } from './web/api/_images.js';
+            import { toEnglishPrompt, hasArabic, translateErrors } from './web/api/_images.js';
             for (const q of ['صمم صور الامن السيبراني', 'ارسملي قطة لابسة نظارات بستايل انمي', 'سيارة لامبورغيني بالليل تحت المطر']) {
               const en = await toEnglishPrompt(q);
-              console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en);
+              console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en, translateErrors.length ? 'errors=' + translateErrors.join(' | ') : '');
               if (hasArabic(en)) process.exitCode = 1;
             }"
       - name: Gemini answers (real key, real network)

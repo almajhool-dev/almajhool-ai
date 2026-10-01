@@ -82,6 +82,17 @@ export async function googleTranslate(text) {
 }
 
 /** chatFn(messages) → نص (اختياري، مثل البوابة) */
+// مترجم احتياطي ثاني مجاني (MyMemory) إذا رفضت Google
+export async function myMemoryTranslate(text) {
+  const url = "https://api.mymemory.translated.net/get?langpair=ar|en&q=" + encodeURIComponent(text.slice(0, 450));
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`mymemory HTTP ${res.status}`);
+  const t = (await res.json())?.responseData?.translatedText || "";
+  if (!t || hasArabic(t) || /MYMEMORY WARNING/i.test(t)) throw new Error("mymemory: no translation");
+  return t.trim();
+}
+export const translateErrors = [];
+
 export async function toEnglishPrompt(prompt, chatFn) {
   // مع Gemini نحسّن كل طلب (عربي أو إنجليزي)؛ بدونه نترجم العربي فقط
   if (!chatFn && !hasArabic(prompt)) return prompt;
@@ -94,10 +105,12 @@ export async function toEnglishPrompt(prompt, chatFn) {
     } catch { /* ننتقل للترجمة */ }
   }
   if (!hasArabic(prompt)) return prompt;
-  try {
-    const t = await googleTranslate(prompt);
-    if (t) return `${t}, highly detailed, high quality`;
-  } catch { /* نكمل بالوصف الأصلي */ }
+  for (const tr of [googleTranslate, myMemoryTranslate]) {
+    try {
+      const t = await tr(prompt);
+      if (t && !hasArabic(t)) return `${t}, highly detailed, high quality`;
+    } catch (e) { translateErrors.push(String(e.message).slice(0, 120)); }
+  }
   return prompt;
 }
 
