@@ -26,7 +26,13 @@ export const POST = route(async (request) => {
     })).slice(0, 2000);
   // 2) نرسم عدة نسخ بنماذج قوية ويختار Gemini الأقرب لطلبك
   let data = {};
-  try { data = await bestImage(english, String(prompt).slice(0, 1000), hasGemini ? gem({ max_tokens: 50 }) : null); }
+  const viaGateway = async (p) => {
+    const r = await gateway("/api/image", { prompt: p, model, width, height, negative_prompt });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.image) throw new Error("gateway: " + String(d.error || r.status).slice(0, 120));
+    return { ...d, provider: d.provider || "workers-ai" };
+  };
+  try { data = await bestImage(english, String(prompt).slice(0, 1000), hasGemini ? gem({ max_tokens: 50 }) : null, [viaGateway]); }
   catch (e) { data = { error: e.message }; }
   // 3) احتياط: البوابة ثم باقي المصادر المجانية
   if (!data.image) {
@@ -50,7 +56,7 @@ export const POST = route(async (request) => {
             VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${data.model || model}, ${mime}, ${bytes}, ${w}, ${h})`;
   await logUsage(user.id, "image", 0, data.provider || "workers-ai", data.model || model);
   return json({ id, url: `/i/${id}`, prompt, understood: english !== String(prompt) ? english : null,
-    provider: data.provider || null, width: w, height: h, created_at: new Date().toISOString() });
+    provider: data.provider || null, candidates: data.candidates || 1, width: w, height: h, created_at: new Date().toISOString() });
 });
 
 export const GET = route(async (request) => {
