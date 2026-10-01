@@ -50,3 +50,36 @@ export async function fallbackImage(prompt, gatewayError) {
   throw new Error("تعذّر توليد الصورة الآن، كل المصادر المجانية مشغولة. جرّب بعد دقيقة. (" + errors.join(" · ").slice(0, 300) + ")");
 }
 
+
+// ------------------------------------------------------------------ فهم الطلب العربي
+// نماذج الصور لا تفهم العربية: نحوّل الوصف إلى برومبت إنجليزي قبل التوليد.
+// 1) نموذج لغوي عبر البوابة (يفهم اللهجات ويحسّن الوصف) — 2) ترجمة Google المجانية بدون مفتاح — 3) الوصف كما هو
+export const hasArabic = (s) => /[؀-ۿ]/.test(String(s || ""));
+
+const IMG_SYSTEM = "You turn any image request (Arabic in any dialect, including Iraqi slang and typos, or English) into ONE vivid English prompt for a text-to-image model, max 70 words. Understand the user's real intent (e.g. 'صمم صور الامن السيبراني' = cybersecurity themed illustration). Remove words like 'draw me'/'ارسملي'/'سويلي'. Keep any text that must appear inside the image in quotes. Output only the prompt.";
+
+export async function googleTranslate(text) {
+  const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" + encodeURIComponent(text);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`translate HTTP ${res.status}`);
+  const data = await res.json();
+  return (data?.[0] || []).map((x) => x?.[0] || "").join("").trim();
+}
+
+/** chatFn(messages) → نص (اختياري، مثل البوابة) */
+export async function toEnglishPrompt(prompt, chatFn) {
+  if (!hasArabic(prompt)) return prompt;
+  if (chatFn) {
+    try {
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 20_000));
+      const t = String(await Promise.race([chatFn([{ role: "system", content: IMG_SYSTEM }, { role: "user", content: prompt }]), timeout]) || "")
+        .trim().replace(/^["'`]+|["'`]+$/g, "");
+      if (t && !hasArabic(t)) return t;
+    } catch { /* ننتقل للترجمة */ }
+  }
+  try {
+    const t = await googleTranslate(prompt);
+    if (t) return `${t}, highly detailed, high quality`;
+  } catch { /* نكمل بالوصف الأصلي */ }
+  return prompt;
+}

@@ -1,5 +1,5 @@
 // الصور: توليد + حفظ دائم في قاعدة البيانات + قائمة صوري + حذف
-import { fallbackImage } from "./_images.js";
+import { fallbackImage, toEnglishPrompt } from "./_images.js";
 import { HttpError, gateway, json, logUsage, randomId, requireUser, route, sql, usageToday } from "./_lib.js";
 
 
@@ -11,15 +11,22 @@ export const POST = route(async (request) => {
   if (user.role !== "admin" && usage.images >= user.daily_images) {
     throw new HttpError(429, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا.`);
   }
+  // نماذج الصور لا تفهم العربية: نترجم ونحسّن الوصف هنا على الخادم (لا يُحسب من حد التوكنات)
+  const english = (await toEnglishPrompt(String(prompt).slice(0, 2000), async (messages) => {
+    const r = await gateway("/api/chat", { messages, max_tokens: 300, temperature: 0.4 });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    return d.text;
+  })).slice(0, 2000);
   let data = {};
   try {
-    const r = await gateway("/api/image", { prompt: String(prompt).slice(0, 2000), model, width, height, negative_prompt });
+    const r = await gateway("/api/image", { prompt: english, model, width, height, negative_prompt });
     data = await r.json().catch(() => ({}));
     if (!r.ok) data = { error: data.error || `HTTP ${r.status}` };
   } catch (e) { data = { error: e.message }; }
   // البوابة فشلت (مثلًا خلصت حصة Cloudflare اليومية 4006)؟ نولّد مباشرة من مصدر مجاني بدون مفتاح
   if (!data.image) {
-    try { data = await fallbackImage(String(prompt).slice(0, 1500), data.error); }
+    try { data = await fallbackImage(english.slice(0, 1500), data.error); }
     catch (e) { throw new HttpError(502, e.message); }
   }
   const [meta, b64] = data.image.split(",");

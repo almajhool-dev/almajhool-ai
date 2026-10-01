@@ -57,7 +57,11 @@ export async function getUser(request) {
     ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, image = EXCLUDED.image,
       last_seen = now(), role = CASE WHEN ${isAdminEmail} THEN 'admin' ELSE app_users.role END
     RETURNING *`;
-  return rows[0];
+  // حد أدنى سخي للجميع (قابل للتغيير من متغيرات Vercel): مليون توكن و100 صورة يوميًا
+  const user = rows[0];
+  user.daily_tokens = Math.max(Number(user.daily_tokens) || 0, Number(process.env.MIN_DAILY_TOKENS) || 1_000_000);
+  user.daily_images = Math.max(Number(user.daily_images) || 0, Number(process.env.MIN_DAILY_IMAGES) || 100);
+  return user;
 }
 
 export async function requireUser(request) {
