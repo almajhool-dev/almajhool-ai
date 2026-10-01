@@ -4,6 +4,7 @@ name: Deploy (Cloudflare gateway + Vercel site)
 # يحتاج أسرار المستودع (Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN  (قالب "Edit Cloudflare Workers")   CLOUDFLARE_ACCOUNT_ID
 #   VERCEL_TOKEN          (vercel.com/account/tokens)
+# ومفاتيح نماذج الذكاء (GROQ_API_KEY، GEMINI_API_KEY، …) تُضاف بنفس الصفحة وتنتقل للبوابة تلقائيًا.
 # أي سر ناقص: الخطوة الخاصة به تُتخطى برسالة واضحة.
 
 on:
@@ -38,6 +39,24 @@ jobs:
         if: steps.check.outputs.ok == 'true'
         working-directory: gateway
         run: npx --yes wrangler@4 deploy
+      # مفاتيح المزودين: تضيفها مرة وحدة في أسرار GitHub، وهنا تنتقل للبوابة تلقائيًا
+      - name: Sync AI provider keys to the gateway
+        if: steps.check.outputs.ok == 'true'
+        working-directory: gateway
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          NAMES="CEREBRAS_API_KEY GROQ_API_KEY GEMINI_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY
+                 GITHUB_MODELS_TOKEN SAMBANOVA_API_KEY COHERE_API_KEY HF_TOKEN SCALEWAY_API_KEY AI_GATEWAY_API_KEY
+                 NEBIUS_API_KEY HYPERBOLIC_API_KEY TOGETHER_API_KEY KILO_API_KEY LLM7_API_KEY OVH_API_KEY POLLINATIONS_API_KEY
+                 EXTRA_PROVIDERS"
+          FILTER=$(printf '%s\n' $NAMES | jq -R . | jq -s .)
+          echo "$ALL_SECRETS" | jq --argjson n "$FILTER" 'with_entries(select(.key as $k | $n | index($k)) | select(.value != ""))' > "$RUNNER_TEMP/keys.json"
+          echo "Keys found in GitHub secrets: $(jq -r 'keys | join(", ")' "$RUNNER_TEMP/keys.json")"
+          if [ "$(jq 'length' "$RUNNER_TEMP/keys.json")" -gt 0 ]; then
+            npx --yes wrangler@4 secret bulk "$RUNNER_TEMP/keys.json"
+          else echo "No provider keys yet — gateway keeps using its keyless sources"; fi
+          rm -f "$RUNNER_TEMP/keys.json"
 
   site:
     runs-on: ubuntu-latest
