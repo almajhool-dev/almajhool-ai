@@ -169,7 +169,10 @@ export async function bestImage(prompt, request, judgeFn) {
   const seed = Math.floor(Math.random() * 2_000_000_000);
   const z = SPACES.find((s) => s.id === "z-image-turbo");
   const f = SPACES.find((s) => s.id === "flux-schnell");
-  const jobs = [spaceImage(z, prompt, seed), spaceImage(z, prompt, seed + 7919), spaceImage(f, prompt, seed + 104729)];
+  // حصة GPU المجانية في Hugging Face صغيرة (≈90 ثانية لكل صورة)، فالرسم المتعدد يستهلكها أسرع.
+  // BEST_OF=1 (الافتراضي): صورة وحدة بأقوى نموذج. BEST_OF=2 أو 3: عدة نسخ ويختار Gemini الأفضل (يحتاج HF_TOKEN بحصة أكبر).
+  const n = Math.max(1, Math.min(3, Number(process.env.BEST_OF) || 1));
+  const jobs = [spaceImage(z, prompt, seed), spaceImage(f, prompt, seed + 104729), spaceImage(z, prompt, seed + 7919)].slice(0, n);
   const settled = await Promise.allSettled(jobs);
   const results = settled.filter((r) => r.status === "fulfilled").map((r) => r.value);
   const errors = settled.filter((r) => r.status === "rejected").map((r) => String(r.reason?.message || r.reason).slice(0, 160));
