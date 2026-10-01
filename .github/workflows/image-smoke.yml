@@ -3,7 +3,7 @@ name: Image sources smoke test
 # يجرّب مصادر الصور المجانية من شبكة حقيقية (خوادم GitHub) عند كل تعديل عليها — بدون نشر
 on:
   push:
-    paths: ["web/api/_images.js", ".github/workflows/image-smoke.yml"]
+    paths: ["web/api/_images.js", "web/api/_direct.js", ".github/workflows/image-smoke.yml"]
   workflow_dispatch:
 
 jobs:
@@ -30,3 +30,17 @@ jobs:
               console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en);
               if (hasArabic(en)) process.exitCode = 1;
             }"
+      - name: Gemini answers (real key, real network)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY not set — skipping"; exit 0; fi
+          node --input-type=module -e "
+            import { directText } from './web/api/_direct.js';
+            import { toEnglishPrompt } from './web/api/_images.js';
+            try {
+              const a = await directText([{ role: 'user', content: 'رد بكلمة وحدة: شنو عاصمة العراق؟' }], { max_tokens: 50 });
+              console.log('GEMINI_OK', a.trim().slice(0, 80));
+              const en = await toEnglishPrompt('صمملي شعار لقناة يوتيوب عن الأمن السيبراني', (m) => directText(m, { max_tokens: 300 }));
+              console.log('GEMINI_PROMPT', en.slice(0, 200));
+            } catch (e) { console.log('GEMINI_FAIL', e.message.slice(0, 400)); process.exitCode = 1; }"

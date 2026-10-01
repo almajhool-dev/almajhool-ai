@@ -7,6 +7,9 @@ export const DIRECT = [
     id: "gemini", label: "Google Gemini", key: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"],
+    // نماذج Gemini «تفكّر» قبل الرد: نخلي التفكير قليل حتى ما يستهلك كل التوكنات ويطلع الرد فارغ
+    extra: { reasoning_effort: "low" },
+    minTokens: 1024,
   },
 ];
 
@@ -35,7 +38,8 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
         const ck = `${p.id}#${ki}|${model}`;
         if (cooled(ck)) continue;
         try {
-          const body = { model, messages, max_tokens: Math.min(Number(max_tokens) || 4096, 32000), stream };
+          const body = { model, messages, ...(p.extra || {}), stream,
+            max_tokens: Math.max(p.minTokens || 0, Math.min(Number(max_tokens) || 4096, 32000)) };
           if (temperature != null) body.temperature = temperature;
           const res = await fetch(p.url, {
             method: "POST",
@@ -59,9 +63,13 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
 
 /** نص كامل بدون بث (للترجمة والمهام القصيرة) */
 export async function directText(messages, opts = {}) {
-  const { res } = await directChat({ messages, ...opts, stream: false });
-  const j = await res.json();
-  const text = j?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("empty response");
-  return text;
+  // محاولتين: إذا رجع رد فارغ (التفكير استهلك التوكنات) نعيد بحد أكبر
+  for (const extra of [0, 4096]) {
+    const { res, provider, model } = await directChat({ messages, ...opts, max_tokens: (Number(opts.max_tokens) || 1024) + extra, stream: false });
+    const j = await res.json();
+    const text = j?.choices?.[0]?.message?.content;
+    if (text && text.trim()) return text;
+    if (!extra) continue;
+    throw new Error(`empty response from ${provider}/${model} (finish_reason: ${j?.choices?.[0]?.finish_reason})`);
+  }
 }
