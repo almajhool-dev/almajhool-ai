@@ -1,5 +1,6 @@
 // الصور: توليد + حفظ دائم في قاعدة البيانات + قائمة صوري + حذف
 import { fallbackImage, toEnglishPrompt } from "./_images.js";
+import { directConfigured, directText } from "./_direct.js";
 import { HttpError, gateway, json, logUsage, randomId, requireUser, route, sql, usageToday } from "./_lib.js";
 
 
@@ -13,6 +14,9 @@ export const POST = route(async (request) => {
   }
   // نماذج الصور لا تفهم العربية: نترجم ونحسّن الوصف هنا على الخادم (لا يُحسب من حد التوكنات)
   const english = (await toEnglishPrompt(String(prompt).slice(0, 2000), async (messages) => {
+    if (directConfigured().length) {
+      try { return await directText(messages, { max_tokens: 300, temperature: 0.4 }); } catch { /* نجرب البوابة */ }
+    }
     const r = await gateway("/api/chat", { messages, max_tokens: 300, temperature: 0.4 });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);

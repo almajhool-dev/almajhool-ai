@@ -62,6 +62,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # مفاتيح النماذج المتصلة مباشرة بالموقع (اختيارية) — تُمرر لـ Vercel عند النشر
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODELS: ${{ secrets.GEMINI_MODELS }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
     steps:
@@ -86,6 +90,15 @@ jobs:
             try { const r = await fallbackImage('a red apple on a wooden table, photo', 'skip-gateway');
                   console.log('IMAGE_OK', r.provider, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
             catch (e) { console.log('IMAGE_FAIL', e.message); process.exitCode = 1; }"
+      - name: Smoke test Gemini (real network)
+        if: steps.check.outputs.ok == 'true' && env.GEMINI_API_KEY != ''
+        continue-on-error: true
+        run: |
+          node --input-type=module -e "
+            import { directText } from './web/api/_direct.js';
+            try { const t = await directText([{ role: 'user', content: 'رد بكلمة وحدة: شنو عاصمة العراق؟' }], { max_tokens: 50 });
+                  console.log('GEMINI_OK', t.trim().slice(0, 60)); }
+            catch (e) { console.log('GEMINI_FAIL', e.message.slice(0, 300)); process.exitCode = 1; }"
       - name: vercel deploy --prod
         if: steps.check.outputs.ok == 'true'
         run: |
@@ -95,4 +108,8 @@ jobs:
           echo "Vercel project rootDirectory: '${ROOT}'"
           if [ "$ROOT" = "web" ]; then DIR=.; else DIR=web; fi
           cd "$DIR"
-          npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN"
+          ENVS=()
+          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN; do
+            if [ -n "${!K}" ]; then ENVS+=(-e "$K=${!K}"); echo "passing $K to the site"; fi
+          done
+          npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" "${ENVS[@]}"
