@@ -603,14 +603,11 @@ async function chatImage(text) {
   addMsg("user", esc(text).replace(/\n/g, "<br>"));
   const bubble = addMsg("assistant", '<span class="muted">🎨 جاري رسم الصورة…</span> <span class="typing"></span>');
   const content = bubble.querySelector(".content");
-  let prompt = text;
-  try {
-    const r = await llmStream([{ role: "system", content: "Rewrite the user's image request (any Arabic dialect or English) as one vivid, specific English prompt for a text-to-image model (max 70 words). Remove words like 'draw me' / 'ارسملي'. Keep any text that must appear in the image in quotes. Output only the prompt." }, { role: "user", content: text }], "gw:auto", { maxTokens: 300 });
-    if (r.text.trim()) prompt = r.text.trim().replace(/^["']|["']$/g, "");
-  } catch { /* نكمل بالوصف الأصلي */ }
+  const prompt = text; // الخادم يفهم الطلب (Gemini) ويحوله لوصف دقيق قبل الرسم
   try {
     const item = await api("/api/image", { method: "POST", body: { prompt, model: "flux", width: 1, height: 1, negative_prompt: "blurry, low quality, watermark, deformed" } });
     content.innerHTML = `<p>تفضل 🎨</p><a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="chat-img" src="${esc(item.url)}" alt="${esc(text)}"></a>
+      ${item.understood ? `<small class="muted" dir="ltr">🧠 فهمت طلبك هيج: ${esc(item.understood)}</small>` : ""}
       <p class="row"><a class="btn small" href="${esc(item.url)}?dl=1">⬇ حفظ</a> <button class="btn small" type="button" data-share="${esc(item.url)}">🔗 مشاركة</button></p>`;
     currentChat.messages.push({ role: "assistant", content: `![${text}](${item.url})`, meta: "صورة · FLUX" });
     galleryLoaded = false;
@@ -747,7 +744,7 @@ $("#img-form").addEventListener("submit", async (e) => {
     b.innerHTML = '<span class="spinner"></span>'; $("#gallery").prepend(b); return b;
   });
   try {
-    if ($("#img-translate").checked) {
+    if (false && $("#img-translate").checked) { // صار على الخادم (Gemini) — أدق ولا يُحسب من التوكنات
       try {
         const r = await llmStream([{ role: "system", content: "Rewrite the user's image idea as one vivid, specific English prompt for a text-to-image model (max 70 words). Keep any text the user wants written in the image in quotes. Output only the prompt." }, { role: "user", content: prompt }], "gw:auto", { maxTokens: 300 });
         if (r.text.trim()) prompt = r.text.trim().replace(/^["']|["']$/g, "");
@@ -758,6 +755,7 @@ $("#img-form").addEventListener("submit", async (e) => {
       try {
         const item = await api("/api/image", { method: "POST", body: { prompt: full, model, width: w, height: h, negative_prompt: "blurry, low quality, watermark, deformed" } });
         box.replaceWith(shotEl(item));
+        if (item.understood) toast("🧠 فهمت طلبك: " + item.understood.slice(0, 140));
         if (state.me) { state.me.usage.images++; renderUsage(); }
       } catch (err) { box.innerHTML = `<span class="b-red small">${esc(err.message)}</span>`; }
     }));
