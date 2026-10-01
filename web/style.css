@@ -310,3 +310,4 @@ body.is-admin .admin-only-inline { display: inline-block !important; }
 .prov { grid-template-columns: auto auto 1fr; }
 .prov > small, .prov > .mono { grid-column: 1 / -1; }
 #provider-summary b { font-size: 1.2rem; }
+.chat-img { display: block; max-width: min(100%, 420px); border-radius: 12px; margin: 6px 0; }
