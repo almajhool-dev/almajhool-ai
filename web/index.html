@@ -20,6 +20,7 @@
 
 <header class="topbar">
   <div class="brand">
+    <button class="icon-btn top-btn" id="btn-menu" type="button" aria-label="القائمة">☰</button>
     <span class="logo" aria-hidden="true">◢◣</span>
     <div>
       <h1>المبرمج المجهول <span class="neon">AI</span></h1>
@@ -27,6 +28,7 @@
     </div>
   </div>
   <div class="conn">
+    <button class="btn small top-new" id="btn-new-top" type="button" title="محادثة جديدة">＋ جديد</button>
     <span class="usage-chip" id="usage-chip" title="التوكنات المستهلكة اليوم">⚡ 0</span>
     <span class="dot admin-only-inline" id="dot-engine" title="المحرك (التدريب)"></span>
     <span class="dot" id="dot-gateway" title="الذكاء الاصطناعي"></span>
@@ -40,6 +42,22 @@
     </div>
   </div>
 </header>
+
+<!-- ====================== القائمة ====================== -->
+<div class="side-menu" id="side-menu" hidden>
+  <div class="side-panel">
+    <div class="side-head"><b>المبرمج المجهول <span class="neon">AI</span></b><button class="icon-btn" id="btn-menu-close" type="button" aria-label="إغلاق">✕</button></div>
+    <button class="side-item primary" data-menu="new" type="button">＋ محادثة جديدة</button>
+    <small class="muted side-label">محادثاتي</small>
+    <div class="side-chats" id="side-chats"></div>
+    <small class="muted side-label">أخرى</small>
+    <button class="side-item" data-menu="image" type="button">🖼 صوري المحفوظة</button>
+    <button class="side-item" data-menu="builder" type="button">🌐 مواقعي المنشورة</button>
+    <button class="side-item" data-menu="dashboard" type="button">▣ استهلاكي</button>
+    <button class="side-item admin-only-inline" data-menu="admin" type="button">♛ لوحة الأدمن</button>
+  </div>
+</div>
+<button class="back-chat" id="btn-back-chat" type="button" hidden>← رجوع للدردشة</button>
 
 <!-- ====================== شاشة الدخول ====================== -->
 <section class="login-screen" id="login-screen">
@@ -185,34 +203,41 @@
 
   <!-- ====================== الدردشة ====================== -->
   <section id="tab-chat" class="tab">
-    <div class="panel chat-panel">
-      <div class="chat-toolbar">
-        <select id="chat-list" aria-label="المحادثات"></select>
-        <button class="btn small" id="btn-new-chat" title="محادثة جديدة">＋ جديدة</button>
-        <button class="btn small danger" id="btn-del-chat" title="حذف المحادثة">🗑</button>
+    <div class="studio" id="studio">
+      <div class="studio-chat">
+        <div class="hidden-controls" hidden>
+          <select id="chat-list" aria-label="المحادثات"></select>
+          <button id="btn-new-chat" type="button">＋</button>
+          <button id="btn-del-chat" type="button">🗑</button>
+          <select id="chat-mode" aria-label="الوضع">
+            <option value="general">general</option><option value="coder">coder</option><option value="security">security</option>
+            <option value="social">social</option><option value="translator">translator</option><option value="teacher">teacher</option>
+          </select>
+          <select id="chat-engine" aria-label="المحرك"></select>
+        </div>
+        <div class="chat-log" id="chat-log"></div>
+        <div class="suggestions" id="chat-suggestions" hidden></div>
+        <form class="composer" id="chat-form">
+          <textarea id="chat-text" rows="1" placeholder="اطلب أي شي… «ابنيلي موقع»، «ارسملي صورة»، أو اسأل سؤال"></textarea>
+          <div class="composer-bar">
+            <small class="muted" id="composer-hint">Enter للإرسال · Shift+Enter سطر جديد</small>
+            <button class="send-btn" type="submit" id="btn-send" aria-label="إرسال">↑</button>
+          </div>
+        </form>
       </div>
-      <div class="chat-toolbar">
-        <select id="chat-mode" aria-label="الوضع">
-          <option value="general">🧠 مساعد عام</option>
-          <option value="coder">💻 مبرمج خبير</option>
-          <option value="security">🛡 أمن سيبراني</option>
-          <option value="social">📈 محتوى وسوشيال ميديا</option>
-          <option value="translator">🌐 مترجم</option>
-          <option value="teacher">🎓 معلّم يشرح خطوة بخطوة</option>
-        </select>
-        <select id="chat-engine" aria-label="المحرك"></select>
+      <div class="studio-preview" id="studio-preview">
+        <div class="sp-bar">
+          <button class="icon-btn sp-close" id="sp-close" type="button" aria-label="إغلاق المعاينة">✕</button>
+          <b class="sp-title" id="sp-title">المعاينة</b>
+          <div class="seg" id="sp-device"><button class="active" data-w="100%" type="button">🖥</button><button data-w="390px" type="button">📱</button></div>
+          <button class="btn small" id="sp-undo" type="button" title="الإصدار السابق">↶</button>
+          <button class="btn small" id="sp-redo" type="button" title="الإصدار التالي">↷</button>
+          <a class="btn small" id="sp-open" target="_blank" rel="noopener" title="فتح الموقع">↗</a>
+          <button class="btn small publish" id="sp-publish" type="button">🚀 نشر</button>
+        </div>
+        <div class="sp-url" id="sp-url" hidden><a id="sp-url-a" target="_blank" rel="noopener"></a><button class="btn small" id="sp-copy" type="button">⧉ نسخ</button></div>
+        <div class="frame-wrap"><iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe></div>
       </div>
-      <div class="chat-log" id="chat-log"></div>
-      <div class="suggestions" id="chat-suggestions">
-        <button data-q="اشرحلي شلون أحمي حساب انستغرام من الاختراق">🛡 حماية حساب انستغرام</button>
-        <button data-q="اكتبلي كود بايثون يحلل ملف CSV ويطلع إحصائيات">💻 كود بايثون لتحليل CSV</button>
-        <button data-q="أعطني 10 أفكار فيديوهات تيك توك عن التقنية">📈 أفكار تيك توك</button>
-        <button data-q="اشرحلي الفرق بين الذكاء الاصطناعي وتعلم الآلة">🎓 AI vs ML</button>
-      </div>
-      <form class="chat-input" id="chat-form">
-        <textarea id="chat-text" rows="1" placeholder="اطلب أي شي بالعربي: سؤال، «ارسملي…»، «سويلي موقع…» (Enter للإرسال)"></textarea>
-        <button class="btn primary" type="submit" id="btn-send">إرسال</button>
-      </form>
     </div>
   </section>
 
@@ -322,7 +347,7 @@
         <div class="seg" id="device-seg"><button class="active" data-device="100%">🖥</button><button data-device="390px">📱</button></div>
         <span class="muted mono" id="build-meta"></span>
       </div>
-      <div class="frame-wrap"><iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe></div>
+      <p class="muted">المعاينة صارت جنب الدردشة 👈</p>
       <pre id="code-view" class="code" hidden></pre>
     </div>
     <div class="panel">
