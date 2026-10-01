@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>المبرمج المجهول AI</title>
+<meta name="description" content="لوحة تحكم المبرمج المجهول AI — تدريب النموذج، البيانات، الدردشة، توليد الصور وبناء المواقع">
+<meta name="theme-color" content="#05070d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%2305070d'/><path d='M14 44 32 14l18 30H38l-6-11-6 11z' fill='%2300f0ff'/></svg>">
+</head>
+<body>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">◢◣</span>
+    <div>
+      <h1>المبرمج المجهول <span class="neon">AI</span></h1>
+      <small id="conn-label">جارٍ الفحص…</small>
+    </div>
+  </div>
+  <div class="conn">
+    <span class="dot" id="dot-engine" title="المحرك (الباكند)"></span><span class="conn-name">المحرك</span>
+    <span class="dot" id="dot-gateway" title="البوابة المجانية"></span><span class="conn-name">البوابة</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="dashboard" class="active"><i>▣</i><span>اللوحة</span></button>
+  <button data-tab="data"><i>⛁</i><span>البيانات</span></button>
+  <button data-tab="train"><i>⚙</i><span>التدريب</span></button>
+  <button data-tab="chat"><i>✦</i><span>الدردشة</span></button>
+  <button data-tab="image"><i>◈</i><span>الصور</span></button>
+  <button data-tab="builder"><i>⌘</i><span>بناء المواقع</span></button>
+  <button data-tab="settings"><i>⚿</i><span>الإعدادات</span></button>
+</nav>
+
+<main>
+  <!-- ====================== لوحة التحكم ====================== -->
+  <section id="tab-dashboard" class="tab active">
+    <div class="notice" id="engine-offline" hidden>
+      <b>المحرك غير متصل.</b> التدريب يحتاج GPU — شغّل الباكند (Colab/Kaggle/سيرفر) ثم ضع رابطه في
+      <a href="#" data-goto="settings">الإعدادات</a>. الدردشة والصور وبناء المواقع تعمل الآن عبر البوابة المجانية.
+    </div>
+    <div class="cards" id="stat-cards"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Training Loss</h2><span class="muted" id="loss-meta"></span></div>
+      <canvas id="loss-chart" height="220"></canvas>
+    </div>
+    <div class="two">
+      <div class="panel">
+        <div class="panel-head"><h2>الموارد</h2></div>
+        <div id="resources" class="resources"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>نتائج التقييم</h2></div>
+        <div class="table-wrap"><table id="eval-table"><thead><tr>
+          <th>الإصدار</th><th>مقارنة بـ</th><th>Perplexity قبل → بعد</th><th>دقة الأسئلة</th><th>الحكم</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================== البيانات ====================== -->
+  <section id="tab-data" class="tab">
+    <div class="panel">
+      <div class="panel-head"><h2>إضافة بيانات تدريب</h2></div>
+      <p class="muted">الصيغ: TXT · JSON · JSONL · CSV · Markdown. تُنظَّف وتُزال المكررات وتُرمَّز وتُضاف كإصدار داتاسيت جديد بدون حذف السابق.</p>
+      <label class="drop" id="drop">
+        <input type="file" id="file-input" multiple accept=".txt,.json,.jsonl,.csv,.md,.markdown">
+        <span>اسحب الملفات هنا أو اضغط للاختيار</span>
+        <small id="file-names"></small>
+      </label>
+      <div class="row">
+        <input id="data-note" placeholder="ملاحظة عن هذه البيانات (اختياري)">
+        <button class="btn primary" id="btn-upload">⬆ إضافة بيانات تدريب</button>
+      </div>
+      <pre class="log" id="upload-log" hidden></pre>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>إصدارات الداتاسيت</h2></div>
+      <div class="table-wrap"><table id="ds-table"><thead><tr>
+        <th>الإصدار</th><th>الأب</th><th>Tokens</th><th>مستندات</th><th>ملفات</th><th>الحجم</th><th>التاريخ</th><th>ملاحظة</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ====================== التدريب ====================== -->
+  <section id="tab-train" class="tab">
+    <div class="panel">
+      <div class="panel-head"><h2>بدء تدريب جديد</h2></div>
+      <form id="train-form" class="form-grid">
+        <label>Model
+          <select name="parent_version" id="sel-model"></select></label>
+        <label>Dataset Version
+          <select name="dataset_version" id="sel-dataset"></select></label>
+        <label>Method
+          <select name="method"><option value="qlora">QLoRA (ذاكرة أقل)</option><option value="lora">LoRA</option><option value="full">Full fine-tuning</option></select></label>
+        <label>Epochs <input name="epochs" type="number" step="0.1" min="0.1" value="1"></label>
+        <label>Batch Size <input name="batch_size" type="number" min="1" value="2"></label>
+        <label>Gradient Accumulation <input name="grad_accum" type="number" min="1" value="8"></label>
+        <label>Learning Rate <input name="learning_rate" type="number" step="any" value="0.0002"></label>
+        <label>LoRA Rank <input name="lora_rank" type="number" min="1" value="16"></label>
+        <label>Context Length <input name="context_length" type="number" min="128" step="128" value="2048"></label>
+        <label>Checkpoint
+          <select name="resume_run" id="sel-resume"><option value="">تدريب جديد</option></select></label>
+        <label>نوع الإصدار
+          <select name="bump"><option value="minor">فرعي (v1 → v1.1)</option><option value="major">رئيسي (v2)</option></select></label>
+        <label class="wide">ملاحظة <input name="note" placeholder="مثال: أول تدريب على مقالات الأمن"></label>
+        <div class="wide row">
+          <button class="btn primary" type="submit">▶ بدء تدريب جديد</button>
+          <button class="btn danger" type="button" id="btn-stop" hidden>■ إيقاف وحفظ Checkpoint</button>
+        </div>
+      </form>
+      <pre class="log" id="train-log" hidden></pre>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>عمليات التدريب</h2></div>
+      <div class="table-wrap"><table id="runs-table"><thead><tr>
+        <th>العملية</th><th>الحالة</th><th>الخطوات</th><th>Loss</th><th>الداتاسيت</th><th>الإصدار الناتج</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>إصدارات النموذج</h2></div>
+      <div class="table-wrap"><table id="models-table"><thead><tr>
+        <th>الإصدار</th><th>الأب</th><th>الداتاسيت</th><th>Eval loss</th><th>الحكم</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>النسخ الاحتياطية</h2><button class="btn small" id="btn-backup">+ نسخة جديدة</button></div>
+      <div class="table-wrap"><table id="backups-table"><thead><tr><th>الملف</th><th>الحجم</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ====================== الدردشة ====================== -->
+  <section id="tab-chat" class="tab">
+    <div class="panel chat-panel">
+      <div class="panel-head">
+        <h2>المبرمج المجهول AI</h2>
+        <select id="chat-engine"></select>
+      </div>
+      <div class="chat-log" id="chat-log">
+        <div class="msg assistant"><div class="bubble">أهلًا! أنا المبرمج المجهول AI. اسألني عن البرمجة، الأمن الرقمي، أو أي شي.</div></div>
+      </div>
+      <form class="chat-input" id="chat-form">
+        <textarea id="chat-text" rows="1" placeholder="اكتب رسالتك…"></textarea>
+        <button class="btn primary" type="submit">إرسال</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ====================== الصور ====================== -->
+  <section id="tab-image" class="tab">
+    <div class="panel">
+      <div class="panel-head"><h2>توليد الصور</h2><span class="muted" id="img-engine"></span></div>
+      <form id="img-form" class="row">
+        <input id="img-prompt" placeholder="صف الصورة… (الإنجليزية تعطي نتائج أدق)" required>
+        <button class="btn primary" type="submit">✦ توليد</button>
+      </form>
+      <label class="check"><input type="checkbox" id="img-translate" checked> ترجمة الوصف للإنجليزية وتحسينه تلقائيًا</label>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </section>
+
+  <!-- ====================== بناء المواقع ====================== -->
+  <section id="tab-builder" class="tab">
+    <div class="panel">
+      <div class="panel-head"><h2>بناء المواقع والتطبيقات</h2></div>
+      <form id="build-form" class="form-grid">
+        <label>النوع
+          <select id="build-kind">
+            <option value="website">موقع</option>
+            <option value="webapp">تطبيق ويب (يعمل على الجوال)</option>
+            <option value="game">لعبة</option>
+            <option value="dashboard">لوحة تحكم</option>
+            <option value="landing">صفحة هبوط</option>
+          </select></label>
+        <label>المحرك <select id="build-engine"></select></label>
+        <label class="wide">الوصف
+          <textarea id="build-prompt" rows="3" placeholder="مثال: متجر إلكتروني لبيع الإكسسوارات بثيم داكن نيون، فيه سلة مشتريات وصفحة منتج" required></textarea></label>
+        <div class="wide row">
+          <button class="btn primary" type="submit" id="btn-build">⌘ ابنِ</button>
+          <button class="btn" type="button" id="btn-download" disabled>⬇ تحميل HTML</button>
+          <button class="btn" type="button" id="btn-copy" disabled>⧉ نسخ الكود</button>
+          <button class="btn" type="button" id="btn-newtab" disabled>↗ فتح بنافذة</button>
+          <button class="btn" type="button" id="btn-reset">↺ مشروع جديد</button>
+        </div>
+      </form>
+      <div class="builder-status muted" id="build-status"></div>
+    </div>
+    <div class="panel preview-panel">
+      <div class="panel-head">
+        <div class="seg"><button class="active" data-view="preview">المعاينة</button><button data-view="code">الكود</button></div>
+        <span class="muted" id="build-meta"></span>
+      </div>
+      <iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe>
+      <pre id="code-view" class="code" hidden></pre>
+    </div>
+  </section>
+
+  <!-- ====================== الإعدادات ====================== -->
+  <section id="tab-settings" class="tab">
+    <div class="panel">
+      <div class="panel-head"><h2>المحرك (الباكند)</h2><span class="dot" id="dot-engine-2"></span></div>
+      <p class="muted">رابط خادم المبرمج المجهول AI الذي يشغّل التدريب والنموذج. محليًا: <code>http://localhost:8000</code> — على Colab: رابط cloudflared.</p>
+      <div class="form-grid">
+        <label class="wide">الرابط <input id="set-engine-url" placeholder="http://localhost:8000" dir="ltr"></label>
+        <label class="wide">مفتاح API (اختياري) <input id="set-engine-key" type="password" dir="ltr"></label>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>البوابة المجانية</h2><span class="dot" id="dot-gateway-2"></span></div>
+      <p class="muted">رابط Cloudflare Worker (مجلد <code>gateway/</code>) — يوفّر الدردشة وتوليد الصور مجانًا.</p>
+      <div class="form-grid">
+        <label class="wide">الرابط <input id="set-gw-url" placeholder="https://free-ai-gateway.xxx.workers.dev" dir="ltr"></label>
+        <label class="wide">ACCESS_TOKEN <input id="set-gw-token" type="password" dir="ltr"></label>
+      </div>
+      <div class="row"><button class="btn primary" id="btn-save">حفظ واختبار الاتصال</button></div>
+      <pre class="log" id="settings-log" hidden></pre>
+    </div>
+    <div class="panel muted small-print">
+      الإعدادات تُحفظ في متصفحك فقط. لا تشارك ACCESS_TOKEN — أي شخص يملكه يستهلك حصصك.
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

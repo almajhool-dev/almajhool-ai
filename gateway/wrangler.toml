@@ -1,0 +1,15 @@
+name = "free-ai-gateway"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# توليد الصور المجاني (FLUX) عبر Workers AI
+[ai]
+binding = "AI"
+
+# المفاتيح لا تُكتب هنا — ضعها كـ secrets:  wrangler secret put GROQ_API_KEY
+# لتغيير الموديلات عند تبدّلها:
+[vars]
+# GROQ_MODEL = "openai/gpt-oss-120b"
+# CEREBRAS_MODEL = "gpt-oss-120b"
+# GEMINI_MODEL = "gemini-2.5-flash"
+# OPENROUTER_MODEL = "openrouter/free"

@@ -1,0 +1,33 @@
+# إعدادات المبرمج المجهول AI — عدّل هنا بدل تعديل الكود
+workspace: workspace
+
+model:
+  # Qwen3-1.7B: يعمل بـ QLoRA على GPU بذاكرة 8GB (Colab/Kaggle المجاني).
+  # للتوسع: Qwen/Qwen3-4B (12GB+) أو Qwen/Qwen3-8B (24GB+) أو Qwen/Qwen3-14B (40GB+)
+  base: Qwen/Qwen3-1.7B
+  trust_remote_code: false
+
+data:
+  min_chars: 30
+  max_doc_chars: 200000
+  shard_tokens: 50000000
+  eval_permille: 5
+  dedup: true
+
+training:
+  method: qlora
+  epochs: 1
+  batch_size: 2
+  grad_accum: 8
+  learning_rate: 0.0002
+  lora_rank: 16
+  lora_alpha: 32
+  context_length: 2048
+  save_steps: 200
+  eval_steps: 200
+  gradient_checkpointing: true
+
+evaluation:
+  ppl_max_blocks: 200
+  prompts_file: config/eval_prompts.jsonl
+  max_new_tokens: 256

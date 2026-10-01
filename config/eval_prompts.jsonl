@@ -1,0 +1,9 @@
+{"id": "ar-greet", "lang": "ar", "category": "عام", "prompt": "عرّف بنفسك باختصار.", "keywords": ["المبرمج المجهول"]}
+{"id": "ar-security-1", "lang": "ar", "category": "أمن", "prompt": "ما هي المصادقة الثنائية ولماذا هي مهمة لحماية الحسابات؟", "keywords": ["رمز", "كلمة المرور", "حماية"]}
+{"id": "ar-security-2", "lang": "ar", "category": "أمن", "prompt": "كيف أعرف أن رسالة وصلتني هي رسالة تصيّد (Phishing)؟", "keywords": ["رابط", "مرسل", "عاجل"]}
+{"id": "ar-code-1", "lang": "ar", "category": "برمجة", "prompt": "اكتب دالة بايثون ترجع مجموع الأعداد الزوجية في قائمة.", "keywords": ["def", "% 2", "return"]}
+{"id": "ar-code-2", "lang": "ar", "category": "برمجة", "prompt": "ما الفرق بين HTML و CSS و JavaScript؟", "keywords": ["HTML", "CSS", "JavaScript"]}
+{"id": "ar-social", "lang": "ar", "category": "سوشيال", "prompt": "أعطني ثلاث نصائح لزيادة التفاعل على حساب تيك توك.", "keywords": ["محتوى", "تفاعل"]}
+{"id": "ar-reason", "lang": "ar", "category": "تفكير", "prompt": "إذا كان عندي 3 تفاحات وأعطيت صديقي 1 ثم اشتريت 5، كم تفاحة عندي؟", "keywords": ["7"]}
+{"id": "en-code", "lang": "en", "category": "coding", "prompt": "Write a JavaScript function that reverses a string.", "keywords": ["function", "reverse", "return"]}
+{"id": "en-fact", "lang": "en", "category": "general", "prompt": "What does HTTPS protect against?", "keywords": ["encrypt"]}
