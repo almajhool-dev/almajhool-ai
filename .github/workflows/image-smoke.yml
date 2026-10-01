@@ -24,10 +24,10 @@ jobs:
       - name: Arabic request is understood (translated to English)
         run: |
           node --input-type=module -e "
-            import { toEnglishPrompt, hasArabic } from './web/api/_images.js';
+            import { toEnglishPrompt, hasArabic, translateErrors } from './web/api/_images.js';
             for (const q of ['صمم صور الامن السيبراني', 'ارسملي قطة لابسة نظارات بستايل انمي', 'سيارة لامبورغيني بالليل تحت المطر']) {
               const en = await toEnglishPrompt(q);
-              console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en);
+              console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en, translateErrors.length ? 'errors=' + translateErrors.join(' | ') : '');
               if (hasArabic(en)) process.exitCode = 1;
             }"
       - name: Gemini answers (real key, real network)
@@ -56,6 +56,7 @@ jobs:
                   console.log('GEMINI_IMAGE_OK', r.model, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
             catch (e) { console.log('GEMINI_IMAGE_FAIL', e.message.slice(0, 600)); }"
       - name: Full path — Gemini prompt + best-of-3 + Gemini judge (real key)
+        continue-on-error: true  # حصة ZeroGPU لخادم الاختبار نفسه قد تنتهي
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
@@ -70,3 +71,15 @@ jobs:
             const t1 = Date.now();
             const r = await bestImage(en, req, (m) => directText(m, { max_tokens: 50 }));
             console.log('BEST_OK', r.provider, 'candidates=' + r.candidates, 'judged=' + !!r.judged, ((Date.now() - t1) / 1000).toFixed(1) + 's', r.image.length, 'chars', 'errors=' + JSON.stringify(r.errors || []));"
+      - name: Gemini keeps requested Arabic text and describes the flag (real key)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY not set — skipping"; exit 0; fi
+          node --input-type=module -e "
+            import { toEnglishPrompt } from './web/api/_images.js';
+            import { directText } from './web/api/_direct.js';
+            const req = 'صمم صوره شخص لابس زي الحشد الشعبي ومكتوب في بدلته الحشد الشعبي بل عربي وعلم الحشد الشعبي';
+            const en = await toEnglishPrompt(req, (m) => directText(m, { max_tokens: 600, temperature: 0.5 }));
+            console.log('PMF_PROMPT', en);
+            if (/He designed|rather Arabic/.test(en)) { console.log('FELL BACK TO GOOGLE TRANSLATE'); process.exitCode = 1; }"

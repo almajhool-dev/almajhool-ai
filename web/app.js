@@ -629,6 +629,7 @@ async function chatImage(text) {
     const item = await api("/api/image", { method: "POST", body: { prompt, model: "flux", width: 1, height: 1, negative_prompt: "blurry, low quality, watermark, deformed" } });
     content.innerHTML = `<p>تفضل 🎨</p><a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="chat-img" src="${esc(item.url)}" alt="${esc(text)}"></a>
       ${item.understood ? `<small class="muted" dir="ltr">🧠 فهمت طلبك هيج: ${esc(item.understood)}</small>` : ""}
+      ${/(مكتوب|اكتب|كتابة|كتابه|عليها|عليه اسم|باسم|نص)/.test(text) ? `<p class="small-print" style="color:var(--amber)">⚠️ ملاحظة: نماذج الرسم المجانية ضعيفة بكتابة الحروف العربية داخل الصورة، فممكن الكتابة تطلع غلط أو بالإنجليزي. باقي التفاصيل تطلع صح.</p>` : ""}
       <p class="row"><a class="btn small" href="${esc(item.url)}?dl=1">⬇ حفظ</a> <button class="btn small" type="button" data-share="${esc(item.url)}">🔗 مشاركة</button></p>`;
     currentChat.messages.push({ role: "assistant", content: `![${text}](${item.url})`, meta: "صورة · FLUX" });
     galleryLoaded = false;
