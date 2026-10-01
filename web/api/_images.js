@@ -98,17 +98,18 @@ export async function toEnglishPrompt(prompt, chatFn) {
   if (!chatFn && !hasArabic(prompt)) return prompt;
   if (chatFn) {
     try {
-      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 20_000));
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 40_000));
       const t = String(await Promise.race([chatFn([{ role: "system", content: IMG_SYSTEM }, { role: "user", content: prompt }]), timeout]) || "")
         .trim().replace(/^["'`]+|["'`]+$/g, "");
       if (t && !arabicOutsideQuotes(t) && t.length > 10) return t;
     } catch { /* ننتقل للترجمة */ }
   }
   if (!hasArabic(prompt)) return prompt;
+  const wanted = arabicTextFromRequest(prompt);
   for (const tr of [googleTranslate, myMemoryTranslate]) {
     try {
       const t = await tr(prompt);
-      if (t && !hasArabic(t)) return `${t}, highly detailed, high quality`;
+      if (t && !hasArabic(t)) return `${t}${wanted ? `, with the Arabic text "${wanted}" clearly written on it` : ""}, highly detailed, high quality`;
     } catch (e) { translateErrors.push(String(e.message).slice(0, 120)); }
   }
   return prompt;
@@ -221,6 +222,20 @@ export async function bestImage(prompt, request, judgeFn, extra = []) {
 // ------------------------------------------------------------------ تصحيح الكتابة العربية داخل الصورة
 // نماذج الرسم «تخترع» الحروف فتطلع مخربطة. نحدد النص المطلوب، وGemini يحدد مكانه بالصورة،
 // والمتصفح يغطي الكتابة الغلط ويكتب النص الصحيح بخط عربي حقيقي.
+// النص المطلوب كتابته حتى لو ما انكتب بين علامات تنصيص: «ومكتوب في بدلته شرطة الاتحادية بالعربي»
+export function arabicTextFromRequest(req) {
+  const m = String(req || "").match(/(?:م?كتوب[ةه]?|[اأ]كتب|كتاب[ةه]|عليها كلمة|عليه كلمة)\s+(.+)/);
+  if (!m) return "";
+  let t = m[1].split(/\s+و(?:علم|شعار|خلفية|خلفيه|بستايل|بلون)|[،,.!؟\n]/)[0];
+  const lang = /^(?:بل عربي|بالعربي|بالعربية|باللغة العربية|عربي)\s+/;
+  t = t.replace(lang, "")
+       .replace(/^(?:على|علي|في|فى|ب|بال)\s*\S+\s+/, "")          // «في بدلته»، «على صدره»
+       .replace(lang, "")
+       .replace(/^(?:عليها|عليه|بيها|بيه|فيها|فيه)\s+/, "")
+       .replace(/\s+(?:بل عربي|بالعربي|بالعربية|باللغة العربية|عربي)\s*$/, "")
+       .replace(/["“”«»]/g, "").trim();
+  return t.split(/\s+/).length <= 6 && hasArabic(t) ? t : "";
+}
 export function requestedTexts(...sources) {
   const out = new Set();
   for (const src of sources) {
@@ -228,6 +243,7 @@ export function requestedTexts(...sources) {
       if (hasArabic(m[1])) out.add(m[1].trim());
     }
   }
+  if (!out.size) for (const src of sources) { const t = arabicTextFromRequest(src); if (t) { out.add(t); break; } }
   return [...out].slice(0, 3);
 }
 

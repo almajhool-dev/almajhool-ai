@@ -6,7 +6,8 @@ export const DIRECT = [
   {
     id: "gemini", label: "Google Gemini", key: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"],
+    // كل نموذج إله حصة مجانية منفصلة: إذا واحد وصل حده ننتقل للي بعده
+    models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
     // نماذج Gemini «تفكّر» قبل الرد: نخلي التفكير قليل حتى ما يستهلك كل التوكنات ويطلع الرد فارغ
     extra: { reasoning_effort: "low" },
     minTokens: 1024,
@@ -26,13 +27,16 @@ const cooled = (k) => (cooldown.get(k) || 0) > Date.now();
 let turn = 0;
 
 /** يرجع Response من أول مزود ينجح (SSE عند stream) مع {provider, model}، أو يرمي خطأ */
-export async function directChat({ messages, provider = "auto", max_tokens = 4096, temperature, stream = true }) {
+export async function directChat({ messages, provider = "auto", max_tokens = 4096, temperature, stream = true, prefer, timeout = 30_000 }) {
   const list = directConfigured().filter((p) => provider === "auto" || provider === p.id);
   const errors = [];
   const t = turn++;
   for (const p of list) {
     const keys = keysOf(p);
-    for (const model of modelsOf(p)) {
+    // prefer: نماذج نفضّلها لهذي المهمة (مثلًا lite للمهام الصغيرة حتى نوفر حصة النموذج الأقوى)
+    const all = modelsOf(p);
+    const order = prefer ? [...prefer.filter((m) => all.includes(m)), ...all.filter((m) => !prefer.includes(m))] : all;
+    for (const model of order) {
       for (let i = 0; i < keys.length; i++) {
         const ki = (t + i) % keys.length;
         const ck = `${p.id}#${ki}|${model}`;
@@ -45,7 +49,7 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
             method: "POST",
             headers: { Authorization: `Bearer ${keys[ki]}`, "Content-Type": "application/json" },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30_000),
+            signal: AbortSignal.timeout(timeout),
           });
           if (res.ok) return { res, provider: p.id, model };
           const text = (await res.text()).slice(0, 200);
