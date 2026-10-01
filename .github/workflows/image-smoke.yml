@@ -21,3 +21,12 @@ jobs:
             try { const r = await fallbackImage('a red apple on a wooden table, photo', 'skip-gateway');
                   console.log('IMAGE_OK', r.provider, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
             catch (e) { console.log('IMAGE_FAIL', e.message); process.exitCode = 1; }"
+      - name: Arabic request is understood (translated to English)
+        run: |
+          node --input-type=module -e "
+            import { toEnglishPrompt, hasArabic } from './web/api/_images.js';
+            for (const q of ['صمم صور الامن السيبراني', 'ارسملي قطة لابسة نظارات بستايل انمي', 'سيارة لامبورغيني بالليل تحت المطر']) {
+              const en = await toEnglishPrompt(q);
+              console.log(hasArabic(en) ? 'AR_FAIL' : 'AR_OK', q, '=>', en);
+              if (hasArabic(en)) process.exitCode = 1;
+            }"
