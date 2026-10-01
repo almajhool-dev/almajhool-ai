@@ -417,15 +417,26 @@ function renderUsage() {
   $("#budget-bar").style.width = Math.min(100, (u.tokens / goal) * 100).toFixed(2) + "%";
   $("#budget-text").textContent = `${num(u.tokens)} / ${num(goal)}`;
 }
-// سعة يومية تقريبية لكل مزود مجاني — للعرض فقط، الأرقام الرسمية تتغير
-const CAPACITY = { cerebras: "≈1M توكن/يوم", groq: "≈200K توكن/يوم", gemini: "≈250–1500 طلب/يوم",
-  openrouter: "50 طلب/يوم (1000 مع شحن 10$)", "workers-ai": "احتياطي مجاني من Cloudflare", "image-flux": "صور عالية الجودة", "image-sdxl": "صور بمقاسات مخصصة" };
 function renderProviders() {
   $("#provider-panel").hidden = !isAdmin();
   if (!isAdmin()) return;
-  $("#provider-list").innerHTML = state.providers.map((p) => `<div class="prov ${p.configured ? "ok" : ""}">
-    <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>
-    <span class="muted mono">${esc(p.model)}</span><small class="muted">${esc(CAPACITY[p.id] || "")}${p.configured ? "" : " — أضف المفتاح لتفعيله"}</small></div>`).join("") || '<p class="muted">البوابة لا ترد — تحقق من GATEWAY_URL.</p>';
+  const text = state.providers.filter((p) => p.kind === "text");
+  const on = text.filter((p) => p.configured);
+  $("#provider-summary").innerHTML = `<b class="neon">${on.length}</b> مصدر شغّال من أصل ${text.length} — كل مصدر تضيف مفتاحه يزيد السعة اليومية`;
+  $("#provider-list").innerHTML = text.map((p) => {
+    const st = p.stats || {};
+    const status = !p.configured ? '<span class="badge b-muted">يحتاج مفتاح</span>'
+      : p.cooldown_s > 0 ? `<span class="badge b-amber">استراحة ${p.cooldown_s}ث</span>`
+      : '<span class="badge b-green">شغّال</span>';
+    const tier = p.tier === 1 ? "قوي" : p.tier === 2 ? "احتياطي" : "طوارئ";
+    return `<div class="prov ${p.configured ? "ok" : ""}">
+      <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>${status}
+      <small class="muted">${esc(tier)} · ${p.keyless && !p.has_key ? "بدون مفتاح · " : ""}${esc(p.cap || "")}</small>
+      <span class="muted mono">${esc(p.model || "")}</span>
+      ${p.configured ? `<small class="muted mono">✓ ${num(st.ok || 0)} · ✗ ${num(st.fail || 0)} · ${shortTokens(st.tokens || 0)} توكن${st.last_error && st.fail ? ` · آخر خطأ: ${esc(String(st.last_error).slice(0, 60))}` : ""}</small>`
+        : `<small>${p.signup ? `<a href="${esc(p.signup)}" target="_blank" rel="noopener">سجّل واحصل على المفتاح ↗</a> · ` : ""}اسم المتغير: <code>${esc(p.key_var || "")}</code></small>`}
+    </div>`;
+  }).join("") || '<p class="muted">البوابة لا ترد — تحقق من GATEWAY_URL.</p>';
 }
 
 // ------------------------------------------------------------------ البث (Streaming)
@@ -1019,3 +1030,4 @@ setInterval(() => {
   if (state.engineOk && ["tab-dashboard", "tab-train"].includes(active)) refreshAll();
 }, 8000);
 window.addEventListener("resize", () => drawLoss(state.lastMetrics || []));
+$("#btn-refresh-prov").addEventListener("click", refreshMe);

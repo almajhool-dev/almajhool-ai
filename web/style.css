@@ -306,3 +306,7 @@ body.is-admin .admin-only-inline { display: inline-block !important; }
 #admin-chart { width: 100%; display: block; }
 .center { display: grid; place-items: center; padding: 30px; }
 #admin-seg { flex-wrap: wrap; }
+.prov .badge { justify-self: start; }
+.prov { grid-template-columns: auto auto 1fr; }
+.prov > small, .prov > .mono { grid-column: 1 / -1; }
+#provider-summary b { font-size: 1.2rem; }
