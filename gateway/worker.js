@@ -1,12 +1,14 @@
-// بوابة الذكاء المجانية v3 — Cloudflare Worker
+// بوابة الذكاء المجانية v4 — Cloudflare Worker
 // تجمع كل مصادر الذكاء الاصطناعي المجانية (بمفتاح وبدون مفتاح) في نقطة واحدة،
 // وتوزّع الطلبات عليها بالتناوب، وتتخطى أي مصدر وصل حده مؤقتًا، وتنتقل للتالي تلقائيًا.
+// كل متغير مفتاح يقبل عدة مفاتيح مفصولة بفاصلة (مفاتيح فريقك/مشاريعك) وتُستخدم بالتناوب.
+// EXTRA_PROVIDERS (JSON) يضيف أي مزود متوافق مع OpenAI بدون تعديل الكود.
 //
 // 1) خادم MCP لكلود:            POST /mcp/<ACCESS_TOKEN>
 // 2) API (CORS):                 POST /api/chat (يدعم stream) · POST /api/image · GET /api/providers
 //    (تتطلب Authorization: Bearer <ACCESS_TOKEN>)
 
-const VERSION = "3.0.0";
+const VERSION = "4.0.0";
 
 // tier 1 = نماذج قوية · tier 2 = مصادر احتياطية بدون مفتاح · Workers AI = آخر احتياط
 // keyless: يعمل بدون أي مفتاح · key: اسم المتغير في Cloudflare · models: تُجرّب بالتناوب (يمكن تجاوزها بـ <ID>_MODELS)
@@ -36,7 +38,46 @@ const PROVIDERS = [
     cap: "2 طلب/دقيقة لكل نموذج بدون مفتاح" },
   { id: "pollinations", tier: 2, url: "https://text.pollinations.ai/openai", key: "POLLINATIONS_API_KEY", keyless: true, maxOut: 8000,
     models: ["openai"], cap: "بدون مفتاح (حدود غير معلنة)" },
+  // ---- v4: مصادر مجانية إضافية (كلها متوافقة مع OpenAI — غيّر النماذج بـ <ID>_MODELS إذا تبدّلت)
+  { id: "github", tier: 1, url: "https://models.github.ai/inference", key: "GITHUB_MODELS_TOKEN", maxOut: 4000,
+    models: ["openai/gpt-4.1", "openai/gpt-4o", "deepseek/DeepSeek-V3-0324", "meta/Llama-4-Maverick-17B-128E-Instruct-FP8"],
+    cap: "≈50–150 طلب/يوم لكل نموذج (توكن GitHub عادي بصلاحية models)", signup: "https://github.com/settings/personal-access-tokens" },
+  { id: "sambanova", tier: 1, url: "https://api.sambanova.ai/v1", key: "SAMBANOVA_API_KEY", usage: true, maxOut: 16000,
+    models: ["DeepSeek-V3.1", "Meta-Llama-3.3-70B-Instruct", "gpt-oss-120b"], cap: "طبقة مجانية بحدود بالدقيقة", signup: "https://cloud.sambanova.ai/apis" },
+  { id: "cohere", tier: 1, url: "https://api.cohere.ai/compatibility/v1", key: "COHERE_API_KEY", maxOut: 8000,
+    models: ["command-a-03-2025", "command-r-plus"], cap: "مفتاح تجريبي ≈1000 طلب/شهر", signup: "https://dashboard.cohere.com/api-keys" },
+  { id: "cloudflare", tier: 1, url: "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1", key: "CLOUDFLARE_API_TOKEN",
+    needs: ["CLOUDFLARE_ACCOUNT_ID"], maxOut: 8000,
+    models: ["@cf/openai/gpt-oss-120b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen3-30b-a3b-fp8"],
+    cap: "10K neurons/يوم لحساب Cloudflare إضافي", signup: "https://dash.cloudflare.com/profile/api-tokens" },
+  { id: "huggingface", tier: 2, url: "https://router.huggingface.co/v1", key: "HF_TOKEN", maxOut: 8000,
+    models: ["openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V3.1", "Qwen/Qwen3-235B-A22B-Instruct-2507"], cap: "رصيد مجاني شهري صغير", signup: "https://huggingface.co/settings/tokens" },
+  { id: "scaleway", tier: 2, url: "https://api.scaleway.ai/v1", key: "SCALEWAY_API_KEY", maxOut: 8000,
+    models: ["gpt-oss-120b", "llama-3.3-70b-instruct", "qwen3-235b-a22b-instruct-2507"], cap: "أول 1,000,000 توكن مجانًا", signup: "https://console.scaleway.com/iam/api-keys" },
+  { id: "vercel", tier: 2, url: "https://ai-gateway.vercel.sh/v1", key: "AI_GATEWAY_API_KEY", usage: true, maxOut: 16000,
+    models: ["openai/gpt-oss-120b", "google/gemini-2.5-flash", "deepseek/deepseek-v3.1"], cap: "رصيد 5$ مجاني شهريًا", signup: "https://vercel.com/dashboard/ai-gateway" },
+  { id: "nebius", tier: 2, url: "https://api.studio.nebius.com/v1", key: "NEBIUS_API_KEY", maxOut: 8000,
+    models: ["openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V3-0324", "meta-llama/Llama-3.3-70B-Instruct"], cap: "رصيد ترحيبي مجاني", signup: "https://studio.nebius.com/settings/api-keys" },
+  { id: "hyperbolic", tier: 2, url: "https://api.hyperbolic.xyz/v1", key: "HYPERBOLIC_API_KEY", maxOut: 8000,
+    models: ["openai/gpt-oss-120b", "meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3"], cap: "رصيد ترحيبي مجاني", signup: "https://app.hyperbolic.xyz/settings" },
 ];
+
+/** مزودون إضافيون من المتغير EXTRA_PROVIDERS:
+ *  [{"id":"myapi","url":"https://host/v1","key":"MYAPI_KEY","models":["model-a"],"cap":"..."}] */
+let extraCache = null;
+function allProviders(env) {
+  if (extraCache && extraCache.raw === env.EXTRA_PROVIDERS) return extraCache.list;
+  let extra = [];
+  try {
+    const parsed = JSON.parse(env.EXTRA_PROVIDERS || "[]");
+    extra = (Array.isArray(parsed) ? parsed : [])
+      .filter((x) => x && x.id && x.url && Array.isArray(x.models) && x.models.length)
+      .filter((x) => !PROVIDERS.some((p) => p.id === x.id))
+      .map((x) => ({ tier: 2, maxOut: 8000, ...x, extra: true }));
+  } catch { /* JSON غير صالح: نتجاهله */ }
+  extraCache = { raw: env.EXTRA_PROVIDERS, list: [...PROVIDERS, ...extra] };
+  return extraCache.list;
+}
 
 // نموذج نصي على Cloudflare نفسه — يعمل بدون أي مفتاح ضمن الحصة اليومية المجانية
 const WORKERS_AI_TEXT = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -55,7 +96,7 @@ const TOOLS = [
       properties: {
         prompt: { type: "string", description: "The message to send" },
         system: { type: "string", description: "Optional system instruction" },
-        provider: { type: "string", enum: ["auto", ...PROVIDERS.map((p) => p.id), "workers-ai"] },
+        provider: { type: "string", description: `auto (default) or a provider id: ${PROVIDERS.map((p) => p.id).join(", ")}, workers-ai` },
         max_tokens: { type: "number", description: "Max output tokens (default 4096)" },
       },
       required: ["prompt"],
@@ -100,18 +141,33 @@ function stat(id) {
   if (!stats.has(id)) stats.set(id, { ok: 0, fail: 0, tokens: 0, last_error: null, last_ok: null });
   return stats.get(id);
 }
-function markFail(p, model, status, msg, retryAfter) {
+function markFail(p, model, status, msg, retryAfter, ki = -1) {
   const s = stat(p); s.fail++; s.last_error = `${status || ""} ${String(msg || "").slice(0, 160)}`.trim();
+  const who = ki >= 0 ? `${p}#${ki}` : p; // مع عدة مفاتيح نوقف المفتاح المعني فقط
   let ms = 30_000, scope = `${p}|${model}`;
-  if (status === 429) ms = Math.max(15_000, (Number(retryAfter) || 60) * 1000);
-  else if (status === 401 || status === 403) { ms = 10 * 60_000; scope = p; } // مفتاح خاطئ: نوقف المزود كله
+  if (status === 429) { ms = Math.max(15_000, (Number(retryAfter) || 60) * 1000); if (ki >= 0) scope = `${who}|${model}`; }
+  else if (status === 401 || status === 403) { ms = 10 * 60_000; scope = who; } // مفتاح خاطئ: نوقفه
   else if (status === 400 || status === 404 || status === 422) ms = 10 * 60_000; // النموذج غير موجود/مرفوض
   cooldown.set(scope, now() + ms);
 }
 function markOk(p, tokens) { const s = stat(p); s.ok++; s.tokens += tokens || 0; s.last_ok = new Date().toISOString(); }
 
-const keyOf = (p, env) => (p.key && env[p.key]) || null;
-const isConfigured = (p, env) => !!keyOf(p, env) || !!p.keyless;
+// المتغير قد يحمل عدة مفاتيح: "k1,k2,k3" — كل مفتاح له إيقاف مؤقت خاص به
+const keysOf = (p, env) => String((p.key && env[p.key]) || "").split(/[\s,]+/).filter(Boolean);
+const keyOf = (p, env) => keysOf(p, env)[0] || null;
+const needsOk = (p, env) => (p.needs || []).every((v) => env[v]);
+const isConfigured = (p, env) => needsOk(p, env) && (keysOf(p, env).length > 0 || !!p.keyless);
+const urlOf = (p, env) => p.url.replace(/\{(\w+)\}/g, (_, v) => env[v] || "");
+/** يختار مفتاحًا غير موقوف بالتناوب (أو null لمزود بدون مفتاح) — undefined يعني كل المفاتيح موقوفة */
+function pickKey(p, env, turn, model) {
+  const keys = keysOf(p, env);
+  if (!keys.length) return p.keyless ? { key: null, ki: -1 } : undefined;
+  for (let i = 0; i < keys.length; i++) {
+    const ki = (turn + i) % keys.length;
+    if (!cooled(`${p.id}#${ki}`) && !cooled(`${p.id}#${ki}|${model}`)) return { key: keys[ki], ki };
+  }
+  return undefined;
+}
 const modelsOf = (p, env) => {
   const custom = (env[`${p.id.toUpperCase()}_MODELS`] || "").split(",").map((x) => x.trim()).filter(Boolean);
   return custom.length ? custom : p.models;
@@ -121,7 +177,7 @@ function rotate(arr, n) { if (!arr.length) return arr; const k = n % arr.length;
 /** يبني قائمة المحاولات: (مزود، نموذج) — الأقوى أولًا وبالتناوب لتوزيع الضغط */
 function plan(env, provider) {
   const turn = rr++;
-  const available = PROVIDERS.filter((p) => isConfigured(p, env) && !cooled(p.id));
+  const available = allProviders(env).filter((p) => isConfigured(p, env) && !cooled(p.id));
   let chosen;
   if (provider && provider !== "auto") chosen = available.filter((p) => p.id === provider);
   else {
@@ -132,13 +188,18 @@ function plan(env, provider) {
   const attempts = [];
   for (const p of chosen) {
     const models = rotate(modelsOf(p, env), turn).filter((m) => !cooled(`${p.id}|${m}`));
-    if (p.routerList) { if (models.length) attempts.push({ p, model: models[0], models: models.slice(0, 3) }); }
-    else for (const m of models.slice(0, 2)) attempts.push({ p, model: m });
+    const withKey = (m) => { const k = pickKey(p, env, turn, m); return k === undefined ? null : { p, model: m, turn, ...k }; };
+    if (p.routerList) { const a = models.length && withKey(models[0]); if (a) attempts.push({ ...a, models: models.slice(0, 3) }); }
+    else for (const m of models.slice(0, 2)) { const a = withKey(m); if (a) attempts.push(a); }
   }
   if (env.AI && (!provider || provider === "auto" || provider === "workers-ai") && !cooled("workers-ai")) {
     attempts.push({ p: { id: "workers-ai" }, model: env.WORKERS_AI_MODEL || WORKERS_AI_TEXT });
   }
-  return attempts.slice(0, 9);
+  // نحتفظ بآخر احتياط (Workers AI) حتى لو كثرت المصادر
+  const last = attempts[attempts.length - 1];
+  const capped = attempts.slice(0, 11);
+  if (last?.p.id === "workers-ai" && !capped.includes(last)) capped.push(last);
+  return capped;
 }
 
 function sanitizeMessages(messages) {
@@ -155,15 +216,14 @@ async function fetchWithTimeout(url, init, ms) {
 }
 
 // ------------------------------------------------------------------ مزود متوافق مع OpenAI
-async function callOpenAI({ p, model, models }, env, messages, maxTokens, stream, temperature) {
+async function callOpenAI({ p, model, models, key }, env, messages, maxTokens, stream, temperature) {
   const body = { model, messages, max_tokens: Math.min(maxTokens, p.maxOut || 8000) };
   if (models) body.models = models;
   if (temperature != null) body.temperature = temperature;
   if (stream) { body.stream = true; if (p.usage) body.stream_options = { include_usage: true }; }
   const headers = { "Content-Type": "application/json", ...(p.headers || {}) };
-  const key = keyOf(p, env);
   if (key) headers.Authorization = `Bearer ${key}`;
-  const res = await fetchWithTimeout(`${p.url}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body) }, 45_000);
+  const res = await fetchWithTimeout(`${urlOf(p, env)}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body) }, 45_000);
   if (!res.ok) {
     const text = (await res.text()).slice(0, 300);
     const err = new Error(`${p.id}/${model}: HTTP ${res.status} ${text}`);
@@ -212,6 +272,19 @@ async function callWorkersAI(env, model, messages, maxTokens, stream, temperatur
   return { stream: raw.pipeThrough(ts) };
 }
 
+/** يجرّب نفس النموذج بكل مفاتيح المزود: إن وصل مفتاح حده (429) أو رُفض (401/403) ننتقل للمفتاح التالي فورًا */
+async function callWithKeys(a, env, messages, maxTokens, stream, temperature) {
+  for (let tries = 0; ; tries++) {
+    if (a.ki >= 0) { const k = pickKey(a.p, env, a.turn + tries, a.model); if (!k) throw new Error(`${a.p.id}: all keys cooling down`); Object.assign(a, k); }
+    try { return await callOpenAI(a, env, messages, maxTokens, stream, temperature); }
+    catch (e) {
+      const keyIssue = [401, 403, 429].includes(e.status);
+      if (a.ki < 0 || !keyIssue || tries + 1 >= keysOf(a.p, env).length) throw e;
+      markFail(a.p.id, a.model, e.status, e.message, e.retryAfter, a.ki);
+    }
+  }
+}
+
 const sseHeaders = (provider, model) => ({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
   "X-Provider": provider, "X-Model": model, ...CORS });
 
@@ -232,16 +305,16 @@ async function chat(env, { messages, provider = "auto", max_tokens = 4096, tempe
         if (!stream) return r;
         return new Response(r.stream, { headers: sseHeaders(id, a.model) });
       }
-      const res = await callOpenAI(a, env, messages, maxTokens, stream, temperature);
+      const res = await callWithKeys(a, env, messages, maxTokens, stream, temperature);
       if (stream) { markOk(id); return new Response(res.body, { headers: sseHeaders(id, a.model) }); }
       const data = await res.json();
       const choice = data?.choices?.[0];
       const text = choice?.message?.content;
-      if (!text) { markFail(id, a.model, 0, "empty response (reasoning used all tokens?)"); errors.push(`${id}: empty`); continue; }
+      if (!text) { markFail(id, a.model, 0, "empty response (reasoning used all tokens?)", null, a.ki); errors.push(`${id}: empty`); continue; }
       markOk(id, data.usage?.total_tokens);
       return { provider: id, model: data.model || a.model, text, usage: data.usage, finish_reason: choice.finish_reason };
     } catch (e) {
-      markFail(id, a.model, e.status || (e.name === "AbortError" ? 504 : 0), e.message, e.retryAfter);
+      markFail(id, a.model, e.status || (e.name === "AbortError" ? 504 : 0), e.message, e.retryAfter, a.ki ?? -1);
       if (id === "workers-ai") cooldown.set("workers-ai", now() + 60_000);
       errors.push(e.message.slice(0, 160));
     }
@@ -277,9 +350,9 @@ async function generateImage(env, { prompt, model = "flux", width, height, negat
 function providersInfo(env) {
   const left = (k) => Math.max(0, Math.round(((cooldown.get(k) || 0) - now()) / 1000));
   return [
-    ...PROVIDERS.map((p) => ({
+    ...allProviders(env).map((p) => ({
       id: p.id, kind: "text", tier: p.tier, configured: isConfigured(p, env), keyless: !!p.keyless,
-      has_key: !!keyOf(p, env), key_var: p.key, model: modelsOf(p, env)[0], models: modelsOf(p, env),
+      has_key: !!keyOf(p, env), keys: keysOf(p, env).length, key_var: [p.key, ...(p.needs || [])].filter(Boolean).join(" + "), model: modelsOf(p, env)[0], models: modelsOf(p, env),
       cap: p.cap, signup: p.signup || null, cooldown_s: left(p.id), stats: stat(p.id),
     })),
     { id: "workers-ai", kind: "text", tier: 3, configured: !!env.AI, keyless: true, model: env.WORKERS_AI_MODEL || WORKERS_AI_TEXT,
