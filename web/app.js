@@ -607,9 +607,29 @@ const AR_SITE = [
 // تعديل على الموقع المفتوح: «غيّر اللون»، «ضيف قسم»، «شيل الزر»، «خلي الخط أكبر»…
 const AR_EDIT = /(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|زيد|زوّد|شيل|احذف|امسح|خلي|خلّي|كبر|كبّر|صغر|صغّر|عدل|عدّل|حسن|حسّن|صلح|صلّح|رتب|رتّب|حرك|حرّك|ترجم الموقع|change|add|remove|make it|fix)/i;
 const AR_NEW = /(موقع جديد|مشروع جديد|تطبيق جديد|لعبة جديدة|من جديد|new site|new project)/i;
+// Lovable: يفتح منصة Lovable والطلب مكتوب وينبني تلقائيًا (Build with URL) — يشتغل بحساب Lovable المجاني للمستخدم
+const LOVABLE = /lovable|ل[وا]?ف[يا]?ب[ي]?ل/i;
+function lovableUrl(request) {
+  const req = String(request).replace(/\s*(?:ب|بـ|بل|بال|ب ال|على|علئ|عن طريق|من|في|ب منصة|بمنصة)?\s*(?:منص[ةه]\s*)?(?:lovable|ل[وا]?ف[يا]?ب[ي]?ل)/gi, " ").trim();
+  const prompt = `${req}\n\nBuild this as a complete, beautiful, responsive website. All visible text must be in Arabic with a right-to-left (RTL) layout and a good Arabic font (e.g. Cairo or Tajawal). Fill every section with realistic content (no lorem ipsum).`;
+  return `https://lovable.dev/?autosubmit=true#prompt=${encodeURIComponent(prompt.slice(0, 20000))}`;
+}
+function lovableButton(request) {
+  return `<a class="btn small" href="${esc(lovableUrl(request))}" target="_blank" rel="noopener">💜 ابنيه بـ Lovable</a>`;
+}
+function chatLovable(text) {
+  currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
+  addMsg("user", esc(text).replace(/\n/g, "<br>"));
+  const msg = "💜 جهزت طلبك لمنصة Lovable. اضغط الزر، وسجّل دخول بحسابك المجاني إذا طلب منك، وراح يبدأ يبني الموقع تلقائيًا.\nالحساب المجاني بـ Lovable إله عدد رسائل محدود باليوم. إذا خلصت، اكتب طلبك هنا بدون كلمة Lovable وأبنيه لك هنا مجانًا.";
+  currentChat.messages.push({ role: "assistant", content: msg, meta: "Lovable" });
+  const bubble = addMsg("assistant", md(msg) + `<div class="build-card"><div class="row">${lovableButton(text)}</div></div>`);
+  saveChats(); $("#chat-log").scrollTop = 1e9;
+  return bubble;
+}
 function detectIntent(text, hasProject = false) {
   const t = text.trim();
   if (t.length > 1500 || AR_ASK.test(t)) return { type: "chat" };
+  if (LOVABLE.test(t) && !AR_DRAW.test(t)) return { type: "lovable" };
   if (AR_DRAW.test(t) || (AR_WANT.test(t) && AR_IMG.test(t))) return { type: "image" };
   if (AR_WANT.test(t) || AR_NEW.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) {
     // «سويلي موقع…» وعندك مشروع: إذا قال «جديد» نبدأ مشروع جديد، وإلا نعتبره طلب موقع جديد أيضًا
@@ -777,18 +797,19 @@ async function chatSite(text, kind, { fresh = true } = {}) {
       ? `${fresh ? "✅ موقعك جاهز ومنشور!" : "✅ عدّلت موقعك ونشرت التحديث على نفس الرابط!"}\n${url}\nاطلب أي تعديل هنا، مثل: «غيّر اللون للأزرق» أو «ضيف قسم آراء العملاء».`
       : `${fresh ? "✅ موقعك جاهز!" : "✅ عدّلت موقعك!"} شوفه بالمعاينة، واضغط «🚀 نشر» حتى تاخذ رابط.`;
     currentChat.messages.push({ role: "assistant", content: msg, meta: r.label });
-    content.innerHTML = md(msg) + buildCardHtml(url);
+    content.innerHTML = md(msg) + buildCardHtml(url, text);
   } catch (err) {
     content.innerHTML = err.name === "AbortError" ? "أُوقف البناء." : `<span class="b-red">${esc(err.message)}</span>`;
   }
   saveChats(); chatAbort = null; btn.textContent = "↑"; btn.classList.remove("danger");
   $("#chat-log").scrollTop = 1e9;
 }
-function buildCardHtml(url) {
+function buildCardHtml(url, request) {
   return `<div class="build-card"><div class="row">
     <button class="btn small" type="button" data-open-preview>👁 المعاينة</button>
     ${url ? `<a class="btn small primary" href="${esc(url)}" target="_blank" rel="noopener">↗ افتح الموقع</a>
     <button class="btn small" type="button" data-copy="${esc(url)}">⧉ نسخ الرابط</button>` : ""}
+    ${request ? lovableButton(request) : ""}
   </div></div>`;
 }
 
@@ -797,6 +818,7 @@ async function sendChat(text) {
   if (currentChat.mode !== "translator") {
     const intent = detectIntent(text, !!currentCode());
     if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
+    if (intent.type === "lovable") return chatLovable(text);
     if (intent.type === "image") return chatImage(text);
     if (intent.type === "site") return chatSite(text, intent.kind, { fresh: true });
     if (intent.type === "edit") return chatSite(text, null, { fresh: false });
