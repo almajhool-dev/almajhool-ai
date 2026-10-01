@@ -75,7 +75,7 @@ async function llm(messages, engine, maxTokens = 2048) {
 
 async function checkConnections() {
   // إذا كانت اللوحة مخدومة من الباكند نفسه نستخدمه تلقائيًا
-  if (!S.engineUrl && !location.hostname.endsWith("github.io") && location.protocol.startsWith("http")) {
+  if (!S.engineUrl && !/github\.io$|vercel\.app$/.test(location.hostname) && location.protocol.startsWith("http")) {
     try {
       const r = await fetch("api/health");
       if (r.ok) { S.engineUrl = location.origin + location.pathname.replace(/\/[^/]*$/, ""); }
@@ -90,7 +90,14 @@ async function checkConnections() {
   for (const id of ["#dot-gateway", "#dot-gateway-2"]) $(id).className = "dot " + (S.gwUrl ? (state.gwOk ? "on" : "off") : "");
   $("#conn-label").textContent = state.engineOk ? "المحرك متصل" : state.gwOk ? "وضع التجربة — البوابة المجانية" : "غير متصل — افتح الإعدادات";
   $("#engine-offline").hidden = state.engineOk;
-  $("#img-engine").textContent = state.gwOk ? "FLUX عبر البوابة المجانية" : "وضع احتياطي (Pollinations)";
+  $("#engine-dash").hidden = !state.engineOk && state.gwOk;
+  $("#img-engine").textContent = state.gwOk ? "عبر البوابة المجانية (Cloudflare)" : "وضع احتياطي (Pollinations)";
+  if (state.gwOk) {
+    fetch(S.gwUrl + "/api/health").then((r) => r.json()).then((h) => ($("#gw-version").textContent = "v" + h.version)).catch(() => {});
+    const sdxl = state.providers.some((p) => p.id === "image-sdxl");
+    $("#img-model").querySelector('[value="sdxl"]').disabled = !sdxl;
+  }
+  renderProviders(); renderUsage();
   await refreshModels();
   fillEngineSelects();
 }
@@ -99,7 +106,7 @@ function fillEngineSelects() {
   const opts = [];
   if (state.gwOk) {
     opts.push(["gw:auto", "البوابة المجانية — تلقائي"]);
-    for (const p of state.providers) if (p.configured && p.id !== "workers-ai-image") opts.push(["gw:" + p.id, `${p.id} — ${p.model}`]);
+    for (const p of state.providers) if (p.configured && p.kind !== "image" && !p.id.endsWith("-image")) opts.push(["gw:" + p.id, `${p.id} — ${p.model}`]);
   }
   if (state.engineOk) {
     for (const m of [...state.models].reverse()) opts.push(["model:" + m.version, `نموذجي ${m.version}`]);
@@ -360,141 +367,430 @@ async function pollLog() {
   } catch { }
 }
 
-// ------------------------------------------------------------------ الدردشة
+// ------------------------------------------------------------------ عداد التوكنات
+const today = () => new Date().toISOString().slice(0, 10);
+const usage = (() => {
+  let u = {};
+  try { u = JSON.parse(store.get("usage", "{}")) || {}; } catch { u = {}; }
+  if (u.day !== today()) u = { ...u, day: today(), today: 0, reqToday: 0, imgToday: 0 };
+  return Object.assign({ total: 0, requests: 0, images: 0, sites: 0, today: 0, reqToday: 0, imgToday: 0 }, u);
+})();
+const estTokens = (s) => Math.ceil(String(s || "").length / 3.2);
+function addUsage({ tokens = 0, requests = 0, images = 0, sites = 0 }) {
+  if (usage.day !== today()) Object.assign(usage, { day: today(), today: 0, reqToday: 0, imgToday: 0 });
+  usage.today += tokens; usage.total += tokens; usage.requests += requests; usage.reqToday += requests;
+  usage.images += images; usage.imgToday += images; usage.sites += sites;
+  store.set("usage", JSON.stringify(usage));
+  renderUsage();
+}
+function renderUsage() {
+  $("#usage-chip").textContent = "⚡ " + shortTokens(usage.today);
+  if (!$("#usage-cards")) return;
+  $("#usage-cards").innerHTML = [
+    card("توكنات اليوم", shortTokens(usage.today), num(usage.today)),
+    card("توكنات الكلي", shortTokens(usage.total), num(usage.total)),
+    card("طلبات اليوم", num(usage.reqToday), `${num(usage.requests)} الكلي`),
+    card("صور اليوم", num(usage.imgToday), `${num(usage.images)} الكلي`),
+    card("مواقع مبنية", num(usage.sites), ""),
+    card("المزودات النشطة", String(state.providers.filter((p) => p.configured && p.kind === "text").length), "نصية"),
+  ].join("");
+  const pct = Math.min(100, (usage.today / 1e7) * 100);
+  $("#budget-bar").style.width = pct.toFixed(2) + "%";
+  $("#budget-text").textContent = `${num(usage.today)} / 10,000,000`;
+}
+// سعة يومية تقريبية لكل مزود مجاني — للعرض فقط، الأرقام الرسمية تتغير
+const CAPACITY = { cerebras: "≈1M توكن/يوم", groq: "≈200K توكن/يوم", gemini: "≈250–1500 طلب/يوم",
+  openrouter: "50 طلب/يوم (1000 مع شحن 10$)", "workers-ai": "≈10K neurons/يوم", "image-flux": "ضمن حصة Cloudflare", "image-sdxl": "ضمن حصة Cloudflare" };
+function renderProviders() {
+  $("#gw-panel").hidden = !state.gwOk;
+  if (!state.gwOk) return;
+  $("#provider-list").innerHTML = state.providers.map((p) => `<div class="prov ${p.configured ? "ok" : ""}">
+    <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>
+    <span class="muted mono">${esc(p.model)}</span><small class="muted">${esc(CAPACITY[p.id] || "")}${p.configured ? "" : " — أضف المفتاح لتفعيله"}</small></div>`).join("");
+}
+
+// ------------------------------------------------------------------ البث (Streaming)
+/** يقرأ SSE بصيغة OpenAI. onDelta(textSoFar, piece, thinking) */
+async function readSSE(res, onDelta) {
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  let buf = "", text = "", finish = null, usageInfo = null, thinking = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n"); buf = lines.pop();
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s.startsWith("data:")) continue;
+      const data = s.slice(5).trim();
+      if (data === "[DONE]") continue;
+      let j; try { j = JSON.parse(data); } catch { continue; }
+      if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+      if (j.usage) usageInfo = j.usage;
+      const ch = j.choices?.[0];
+      if (!ch) continue;
+      if (ch.finish_reason) finish = ch.finish_reason;
+      const piece = ch.delta?.content || "";
+      const reasoning = ch.delta?.reasoning || ch.delta?.reasoning_content;
+      if (piece) { text += piece; thinking = false; onDelta?.(text, piece, false); }
+      else if (reasoning && !thinking) { thinking = true; onDelta?.(text, "", true); }
+    }
+  }
+  return { text, finish, usage: usageInfo };
+}
+
+/** استدعاء نموذج مع بث: engine = "gw:auto" | "gw:groq" | "model:v1.1" */
+async function llmStream(messages, engine, { maxTokens = 4096, onDelta, signal, temperature } = {}) {
+  let res, label;
+  if (engine.startsWith("model:")) {
+    const headers = { "Content-Type": "application/json" };
+    if (S.engineKey) headers.Authorization = "Bearer " + S.engineKey;
+    res = await fetch(S.engineUrl + "/v1/chat/completions", { method: "POST", headers, signal,
+      body: JSON.stringify({ model: engine.slice(6), messages, max_tokens: maxTokens, temperature: temperature ?? 0.7, stream: true }) });
+    label = "نموذجي " + engine.slice(6);
+  } else {
+    if (!S.gwUrl) throw new Error("البوابة غير مضبوطة — أضف رابطها في الإعدادات");
+    res = await fetch(S.gwUrl + "/api/chat", { method: "POST", signal,
+      headers: { Authorization: "Bearer " + S.gwToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, provider: engine.slice(3) || "auto", max_tokens: maxTokens, temperature, stream: true }) });
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || e.detail || `HTTP ${res.status}`);
+  }
+  const ctype = res.headers.get("content-type") || "";
+  let out;
+  if (ctype.includes("event-stream")) out = await readSSE(res, onDelta);
+  else { // بوابة قديمة (v1) لا تدعم البث
+    const j = await res.json(); out = { text: j.text, finish: j.finish_reason, usage: j.usage }; onDelta?.(out.text, out.text, false);
+  }
+  if (!label) label = `${res.headers.get("x-provider") || "gateway"} · ${res.headers.get("x-model") || ""}`;
+  const tokens = out.usage?.total_tokens || estTokens(messages.map((m) => m.content).join("")) + estTokens(out.text);
+  addUsage({ tokens, requests: 1 });
+  return { ...out, label };
+}
+
+// ------------------------------------------------------------------ Markdown
 function md(text) {
-  const parts = String(text).split(/```(\w*)\n?([\s\S]*?)```/g);
+  const parts = String(text).split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g);
   let out = "";
   for (let i = 0; i < parts.length; i++) {
     if (i % 3 === 0) {
-      out += esc(parts[i]).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
-    } else if (i % 3 === 2) out += `<pre>${esc(parts[i])}</pre>`;
+      out += esc(parts[i])
+        .replace(/^### (.*)$/gm, "<h4>$1</h4>").replace(/^## (.*)$/gm, "<h3>$1</h3>").replace(/^# (.*)$/gm, "<h3>$1</h3>")
+        .replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+        .replace(/^\s*[-*] (.*)$/gm, "• $1").replace(/\n/g, "<br>");
+    } else if (i % 3 === 2) {
+      const lang = parts[i - 1] || "code";
+      out += `<div class="codebox"><div class="codebar"><span>${esc(lang)}</span><button class="copy-code" type="button">نسخ</button></div><pre>${esc(parts[i])}</pre></div>`;
+    }
   }
   return out;
 }
-const chatHistory = [];
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest(".copy-code");
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.closest(".codebox").querySelector("pre").textContent); b.textContent = "✓ تم"; setTimeout(() => (b.textContent = "نسخ"), 1500); }
+  catch { toast("تعذّر النسخ", true); }
+});
+
+// ------------------------------------------------------------------ الدردشة
+const MODES = {
+  general: "أنت «المبرمج المجهول AI»، مساعد ذكي يتحدث العربية (واللهجة العراقية عند الحاجة) والإنجليزية. أجب بدقة ووضوح وبلغة السؤال، ونظّم الإجابة بعناوين ونقاط عند الحاجة.",
+  coder: "أنت «المبرمج المجهول AI» بوضع المبرمج الخبير. اكتب كودًا كاملًا جاهزًا للتشغيل بدون اختصارات أو TODO، مع شرح مختصر بالعربية، واستخدم أفضل الممارسات والأمان.",
+  security: "أنت «المبرمج المجهول AI» بوضع خبير الأمن السيبراني الدفاعي. ساعد في حماية الحسابات والأنظمة، شرح الثغرات وطرق الوقاية، والاستجابة للحوادث. لا تساعد في اختراق حسابات أو أنظمة الآخرين.",
+  social: "أنت «المبرمج المجهول AI» بوضع خبير المحتوى والسوشيال ميديا. اكتب أفكار وسكربتات وكابشنات جذابة لتيك توك وانستغرام ويوتيوب، مع هاشتاغات وتوقيت نشر مناسب.",
+  translator: "أنت مترجم محترف. ترجم النص بين العربية والإنجليزية (أو اللغة المطلوبة) بدقة وأسلوب طبيعي، وأعطِ الترجمة فقط ما لم يُطلب شرح.",
+  teacher: "أنت «المبرمج المجهول AI» بوضع المعلّم. اشرح خطوة بخطوة بأمثلة بسيطة، ثم لخّص بنقاط، واطرح سؤالًا قصيرًا للتأكد من الفهم.",
+};
+const chats = (() => { try { return JSON.parse(store.get("chats", "[]")) || []; } catch { return []; } })();
+let currentChat = null, chatAbort = null;
+function saveChats() {
+  while (chats.length > 40) chats.shift();
+  for (let i = 0; i < chats.length; i++) {
+    try { store.set("chats", JSON.stringify(chats)); return; } catch { chats.shift(); }
+  }
+}
+function newChat() {
+  currentChat = { id: Date.now().toString(36), title: "محادثة جديدة", mode: $("#chat-mode").value || "general", messages: [] };
+  chats.push(currentChat); saveChats(); renderChatList(); renderChat();
+}
+function renderChatList() {
+  $("#chat-list").innerHTML = chats.slice().reverse().map((c) => `<option value="${c.id}">${esc(c.title)}</option>`).join("");
+  if (currentChat) $("#chat-list").value = currentChat.id;
+}
+function renderChat() {
+  const log = $("#chat-log"); log.innerHTML = "";
+  if (!currentChat.messages.length) {
+    addMsg("assistant", md("أهلًا! أنا **المبرمج المجهول AI** 👋\nاختار الوضع اللي يناسبك من فوق، واسألني أي شي — برمجة، أمن رقمي، محتوى، ترجمة."));
+  }
+  for (const m of currentChat.messages) addMsg(m.role, m.role === "user" ? esc(m.content).replace(/\n/g, "<br>") : md(m.content), m.meta);
+  $("#chat-mode").value = currentChat.mode || "general";
+  $("#chat-suggestions").hidden = currentChat.messages.length > 0;
+}
 function addMsg(role, html, meta = "") {
   const d = document.createElement("div"); d.className = "msg " + role;
-  d.innerHTML = `<div class="bubble">${html}${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</div>`;
+  d.innerHTML = `<div class="bubble"><div class="content">${html}</div>${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</div>`;
   $("#chat-log").appendChild(d); $("#chat-log").scrollTop = 1e9; return d;
 }
-$("#chat-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const ta = $("#chat-text"); const text = ta.value.trim(); if (!text) return;
+$("#chat-list").addEventListener("change", (e) => { currentChat = chats.find((c) => c.id === e.target.value); renderChat(); });
+$("#btn-new-chat").addEventListener("click", newChat);
+$("#btn-del-chat").addEventListener("click", () => {
+  if (!confirm("حذف هذه المحادثة؟")) return;
+  chats.splice(chats.indexOf(currentChat), 1); saveChats();
+  if (!chats.length) newChat(); else { currentChat = chats[chats.length - 1]; renderChatList(); renderChat(); }
+});
+$("#chat-mode").addEventListener("change", (e) => { currentChat.mode = e.target.value; saveChats(); });
+$("#chat-suggestions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]"); if (!b) return;
+  $("#chat-text").value = b.dataset.q; $("#chat-form").requestSubmit();
+});
+
+async function sendChat(text) {
   const engine = $("#chat-engine").value; if (!engine) return toast("اضبط البوابة أو المحرك في الإعدادات", true);
-  ta.value = ""; addMsg("user", md(text)); chatHistory.push({ role: "user", content: text });
-  const pending = addMsg("assistant", '<span class="typing"></span>');
+  if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
+  currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
+  addMsg("user", esc(text).replace(/\n/g, "<br>"));
+  $("#chat-suggestions").hidden = true;
+  const bubble = addMsg("assistant", '<span class="typing"></span>');
+  const content = bubble.querySelector(".content");
+  const btn = $("#btn-send"); btn.textContent = "■ إيقاف"; btn.classList.add("danger");
+  chatAbort = new AbortController();
+  let partial = "";
   try {
-    const sys = { role: "system", content: "أنت «المبرمج المجهول AI»، مساعد ذكي يتحدث العربية والإنجليزية، متخصص في البرمجة والأمن الرقمي وتحليل السوشيال ميديا. أجب بدقة ووضوح وبلغة السؤال." };
-    const r = await llm([sys, ...chatHistory.slice(-20)], engine, 2048);
-    chatHistory.push({ role: "assistant", content: r.text });
-    pending.querySelector(".bubble").innerHTML = md(r.text) + `<span class="meta">${esc(r.label)}</span>`;
+    const sys = { role: "system", content: MODES[currentChat.mode] || MODES.general };
+    const history = currentChat.messages.slice(-24).map(({ role, content }) => ({ role, content }));
+    let raf = 0;
+    const r = await llmStream([sys, ...history], engine, {
+      maxTokens: 8192, signal: chatAbort.signal,
+      onDelta: (t, _p, thinking) => {
+        partial = t;
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          content.innerHTML = thinking && !t ? '<span class="muted">🤔 يفكّر…</span>' : md(t) + '<span class="typing"></span>';
+          $("#chat-log").scrollTop = 1e9;
+        });
+      },
+    });
+    cancelAnimationFrame(raf);
+    const meta = r.label + (r.finish === "length" ? " · (انقطع — اكتب «كمّل»)" : "");
+    currentChat.messages.push({ role: "assistant", content: r.text, meta });
+    content.innerHTML = md(r.text);
+    bubble.querySelector(".bubble").insertAdjacentHTML("beforeend", `<span class="meta">${esc(meta)}</span>`);
   } catch (err) {
-    pending.querySelector(".bubble").innerHTML = `<span class="b-red">${esc(err.message)}</span>`;
-    chatHistory.pop();
+    if (err.name === "AbortError") {
+      if (partial) currentChat.messages.push({ role: "assistant", content: partial, meta: "أُوقف" });
+      content.innerHTML = md(partial || "") + '<span class="meta">أُوقف</span>';
+    } else {
+      content.innerHTML = `<span class="b-red">${esc(err.message)}</span>`;
+      currentChat.messages.pop();
+    }
   }
+  saveChats();
+  chatAbort = null; btn.textContent = "إرسال"; btn.classList.remove("danger");
   $("#chat-log").scrollTop = 1e9;
+}
+$("#chat-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (chatAbort) { chatAbort.abort(); return; }
+  const ta = $("#chat-text"); const text = ta.value.trim(); if (!text) return;
+  ta.value = ""; ta.style.height = "";
+  sendChat(text);
 });
 $("#chat-text").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#chat-form").requestSubmit(); }
 });
+$("#chat-text").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; });
 
 // ------------------------------------------------------------------ الصور
+const gallery = (() => { try { return JSON.parse(store.get("gallery", "[]")) || []; } catch { return []; } })();
+function saveGallery() {
+  while (gallery.length > 12) gallery.pop();
+  while (gallery.length) {
+    try { store.set("gallery", JSON.stringify(gallery)); return; } catch { gallery.pop(); }
+  }
+  store.set("gallery", "[]");
+}
+function shotEl(item) {
+  const box = document.createElement("div"); box.className = "shot";
+  box.innerHTML = `<img alt="${esc(item.prompt)}" src="${item.src}" loading="lazy" style="aspect-ratio:${item.w || 1}/${item.h || 1}">
+    <div class="cap"><span title="${esc(item.prompt)}">${esc(item.prompt)}</span>
+    <a href="${item.src}" download="almajhool-ai-${Date.now()}.${item.src.startsWith("data:image/png") ? "png" : "jpg"}" title="تحميل">⬇</a></div>`;
+  box.querySelector("img").addEventListener("click", () => window.open(URL.createObjectURL(dataUrlToBlob(item.src)), "_blank", "noopener"));
+  return box;
+}
+function dataUrlToBlob(u) {
+  if (!u.startsWith("data:")) return new Blob([u]);
+  const [meta, b64] = u.split(","); const bin = atob(b64); const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: meta.slice(5, meta.indexOf(";")) });
+}
+function renderGallery() { const g = $("#gallery"); g.innerHTML = ""; gallery.forEach((it) => g.appendChild(shotEl(it))); }
+$("#img-model").addEventListener("change", () => { $("#img-size").disabled = $("#img-model").value !== "sdxl"; });
+$("#img-size").disabled = true;
+$("#btn-clear-gallery").addEventListener("click", () => { if (confirm("مسح كل الصور من المعرض؟")) { gallery.length = 0; saveGallery(); renderGallery(); } });
+
 $("#img-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   let prompt = $("#img-prompt").value.trim(); if (!prompt) return;
-  const box = document.createElement("div"); box.className = "shot loading"; box.textContent = "جارٍ التوليد…";
-  $("#gallery").prepend(box);
+  const model = $("#img-model").value, count = +$("#img-count").value, style = $("#img-style").value;
+  const [w, h] = model === "sdxl" ? $("#img-size").value.split("x").map(Number) : [1, 1];
+  const btn = $("#btn-img"); btn.disabled = true;
+  const placeholders = Array.from({ length: count }, () => {
+    const b = document.createElement("div"); b.className = "shot loading"; b.style.aspectRatio = `${w}/${h}`;
+    b.innerHTML = '<span class="spinner"></span>'; $("#gallery").prepend(b); return b;
+  });
   try {
     if ($("#img-translate").checked && state.gwOk) {
       try {
-        const r = await llm([{ role: "system", content: "Rewrite the user's image idea as one vivid English prompt for an image model (max 60 words). Output only the prompt." }, { role: "user", content: prompt }], "gw:auto", 200);
-        prompt = r.text.trim().replace(/^["']|["']$/g, "");
+        const r = await llmStream([{ role: "system", content: "Rewrite the user's image idea as one vivid, specific English prompt for a text-to-image model (max 70 words). Keep any text the user wants written in the image in quotes. Output only the prompt." }, { role: "user", content: prompt }], "gw:auto", { maxTokens: 300 });
+        if (r.text.trim()) prompt = r.text.trim().replace(/^["']|["']$/g, "");
       } catch { /* نكمل بالوصف الأصلي */ }
     }
-    let src;
-    if (state.gwOk) src = (await gwFetch("/api/image", { prompt })).image;
-    else src = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${Date.now() % 1e6}`;
-    const img = new Image(); img.alt = prompt; img.src = src;
-    await new Promise((ok, bad) => { img.onload = ok; img.onerror = () => bad(new Error("تعذّر تحميل الصورة")); });
-    box.className = "shot"; box.textContent = "";
-    box.appendChild(img);
-    const cap = document.createElement("div"); cap.className = "cap";
-    cap.innerHTML = `<span title="${esc(prompt)}">${esc(prompt)}</span>`;
-    const dl = document.createElement("a"); dl.textContent = "⬇"; dl.href = src; dl.download = "almajhool-ai.jpg"; dl.target = "_blank"; dl.rel = "noopener";
-    cap.appendChild(dl); box.appendChild(cap);
-  } catch (err) { box.className = "shot loading"; box.innerHTML = `<span class="b-red">${esc(err.message)}</span>`; }
+    const full = style ? `${prompt}, ${style}` : prompt;
+    await Promise.all(placeholders.map(async (box, i) => {
+      try {
+        let src;
+        if (state.gwOk) {
+          src = (await gwFetch("/api/image", { prompt: full, model, width: w, height: h, negative_prompt: "blurry, low quality, watermark, deformed" })).image;
+        } else {
+          src = `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=${w > 1 ? w : 1024}&height=${h > 1 ? h : 1024}&nologo=true&seed=${Date.now() % 1e6 + i}`;
+          await new Promise((ok, bad) => { const im = new Image(); im.onload = ok; im.onerror = () => bad(new Error("تعذّر تحميل الصورة")); im.src = src; });
+        }
+        const item = { src, prompt: full, w, h, t: Date.now() };
+        gallery.unshift(item);
+        box.replaceWith(shotEl(item));
+        addUsage({ images: 1 });
+      } catch (err) { box.innerHTML = `<span class="b-red small">${esc(err.message)}</span>`; }
+    }));
+    saveGallery();
+  } finally { btn.disabled = false; }
 });
 
 // ------------------------------------------------------------------ بناء المواقع
 const KIND = {
-  website: "a complete multi-section website",
-  webapp: "a mobile-first web application with real working functionality and state",
-  game: "a fully playable browser game with controls for both touch and keyboard",
-  dashboard: "an admin dashboard with charts drawn on <canvas> and realistic sample data",
-  landing: "a high-converting landing page",
+  website: "a complete, multi-section, production-ready website",
+  webapp: "a mobile-first web application with real, fully working functionality and persistent state (localStorage)",
+  game: "a fully playable, polished browser game with touch AND keyboard controls, score, levels and game-over/restart",
+  dashboard: "a rich admin/analytics dashboard with charts drawn on <canvas> (no chart libraries needed) and realistic sample data",
+  landing: "a high-converting landing page with hero, features, social proof, FAQ and clear call-to-action",
 };
-const build = { code: "", history: [] };
+const build = (() => {
+  let saved = {}; try { saved = JSON.parse(store.get("build", "{}")) || {}; } catch { }
+  return { versions: saved.versions || [], idx: saved.idx ?? -1, abort: null };
+})();
+const currentCode = () => build.versions[build.idx]?.code || "";
+function saveBuild() {
+  const keep = build.versions.slice(-8);
+  const idx = Math.min(build.idx, keep.length - 1);
+  try { store.set("build", JSON.stringify({ versions: keep, idx })); } catch { try { store.set("build", JSON.stringify({ versions: keep.slice(-2), idx: Math.min(idx, 1) })); } catch { } }
+}
 function extractHtml(text) {
-  const m = text.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  const m = text.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
   let code = m ? m[1] : text;
   const i = code.search(/<!doctype html|<html/i);
   if (i > 0) code = code.slice(i);
   return code.trim();
 }
-function setPreview(code) {
-  build.code = code;
+function setPreview() {
+  const code = currentCode();
   $("#preview").srcdoc = code;
   $("#code-view").textContent = code;
   for (const id of ["#btn-download", "#btn-copy", "#btn-newtab"]) $(id).disabled = !code;
-  $("#build-meta").textContent = code ? `${(code.length / 1024).toFixed(1)} KB` : "";
+  $("#btn-undo").disabled = build.idx <= 0;
+  $("#btn-redo").disabled = build.idx >= build.versions.length - 1;
+  $("#build-meta").textContent = code ? `${(code.length / 1024).toFixed(1)} KB · ${code.split("\n").length} سطر` : "";
+  $("#build-version").textContent = build.versions.length ? `الإصدار ${build.idx + 1} / ${build.versions.length}` : "";
   $("#btn-build").textContent = code ? "✎ عدّل" : "⌘ ابنِ";
   $("#build-prompt").placeholder = code ? "اكتب التعديل المطلوب… مثال: أضف وضع فاتح وزر واتساب عائم" : "صف المشروع…";
 }
+$("#build-templates").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]"); if (!b) return;
+  if (currentCode() && !confirm("هذا يبدأ مشروع جديد. متأكد؟")) return;
+  build.versions = []; build.idx = -1; setPreview();
+  $("#build-kind").value = b.dataset.kind; $("#build-prompt").value = b.dataset.q; $("#build-form").requestSubmit();
+});
+
 $("#build-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (build.abort) { build.abort.abort(); return; }
   const req = $("#build-prompt").value.trim(); if (!req) return;
   const engine = $("#build-engine").value; if (!engine) return toast("اضبط البوابة أو المحرك في الإعدادات", true);
-  const kind = $("#build-kind").value;
-  const system = `You are an expert front-end engineer. Build ${KIND[kind]}.
-Rules: output ONE complete self-contained HTML file inside a single \`\`\`html code block — inline <style> and <script>, no build step.
-Make it production quality: responsive (mobile first), accessible, polished modern design, real working interactions (no placeholder "TODO").
-If the request is in Arabic, the page content must be Arabic with dir="rtl" and the Cairo font from Google Fonts.
-External resources are allowed only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and fonts.googleapis.com. Use https://picsum.photos for placeholder images.
-Do not explain — output only the code block.`;
-  const messages = build.code
-    ? [{ role: "system", content: system }, { role: "user", content: `Current file:\n\`\`\`html\n${build.code}\n\`\`\`\nApply this change and return the FULL updated file: ${req}` }]
+  const kind = $("#build-kind").value; const budget = +$("#build-size").value;
+  const system = `You are a world-class front-end engineer and UI designer. Build ${KIND[kind]}.
+Rules:
+- Output ONE complete self-contained HTML file inside a single \`\`\`html code block — inline <style> and <script>, no build step.
+- Production quality: responsive (mobile first), accessible, modern polished design with smooth micro-interactions, real working features (no placeholder TODOs, no lorem ipsum unless asked).
+- If the request is in Arabic, all UI text must be Arabic with dir="rtl" and the "Cairo" font from Google Fonts.
+- External resources only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com, fonts.googleapis.com. Use https://picsum.photos/seed/<word>/W/H for images.
+- Do not explain anything — output only the code block.`;
+  const code = currentCode();
+  const base = code
+    ? [{ role: "system", content: system }, { role: "user", content: `Current file:\n\`\`\`html\n${code}\n\`\`\`\nApply this change and return the FULL updated file: ${req}` }]
     : [{ role: "system", content: system }, { role: "user", content: req }];
-  const btn = $("#btn-build"); btn.disabled = true;
-  $("#build-status").textContent = "جارٍ البناء… قد يستغرق دقيقة";
+  const btn = $("#btn-build"); btn.textContent = "■ إيقاف"; btn.classList.add("danger");
+  build.abort = new AbortController();
+  let full = "", label = "", rounds = 0;
+  const status = $("#build-status");
   try {
-    const r = await llm(messages, engine, 12000);
-    const code = extractHtml(r.text);
-    if (!/<html|<body|<div/i.test(code)) throw new Error("النموذج لم يرجع HTML صالحًا — جرّب محركًا آخر");
-    build.history.push({ req, code });
-    setPreview(code);
+    let messages = base;
+    for (;;) {
+      rounds++;
+      const r = await llmStream(messages, engine, {
+        maxTokens: Math.min(budget, 32000), signal: build.abort.signal, temperature: 0.4,
+        onDelta: (t, _p, thinking) => {
+          status.textContent = thinking && !t ? "🤔 يخطط للمشروع…" : `✍ يكتب الكود… ${(full.length + t.length).toLocaleString("en-US")} حرف${rounds > 1 ? ` (جزء ${rounds})` : ""}`;
+        },
+      });
+      full += r.text; label = r.label;
+      // إكمال تلقائي إذا انقطع الكود بسبب حد التوكنات
+      const unfinished = r.finish === "length" || (!/<\/html>\s*(```)?\s*$/i.test(full.trim()) && /<html|<!doctype/i.test(full));
+      if (!unfinished || rounds >= 6 || full.length > budget * 4) break;
+      status.textContent = `↻ الكود طويل — أكمل الجزء ${rounds + 1}…`;
+      messages = [...base, { role: "assistant", content: full },
+        { role: "user", content: "Continue EXACTLY from where you stopped. Do not repeat anything and do not restart the code block — output only the remaining code." }];
+    }
+    let html = extractHtml(full);
+    if (!/<html|<body|<div/i.test(html)) throw new Error("النموذج لم يرجع HTML صالحًا — جرّب محركًا آخر");
+    if (!/<\/html>/i.test(html)) html += "\n</body></html>";
+    build.versions = build.versions.slice(0, build.idx + 1);
+    build.versions.push({ req, code: html, t: Date.now() });
+    build.idx = build.versions.length - 1;
+    saveBuild(); setPreview(); addUsage({ sites: 1 });
     $("#build-prompt").value = "";
-    $("#build-status").textContent = `✓ ${r.label}`;
-  } catch (err) { $("#build-status").innerHTML = `<span class="b-red">${esc(err.message)}</span>`; }
-  btn.disabled = false;
+    status.textContent = `✓ ${label}${rounds > 1 ? ` · ${rounds} أجزاء` : ""}`;
+  } catch (err) {
+    status.innerHTML = err.name === "AbortError" ? "أُوقف البناء." : `<span class="b-red">${esc(err.message)}</span>`;
+  }
+  build.abort = null; btn.classList.remove("danger"); setPreview();
 });
-$$(".seg button").forEach((b) => b.addEventListener("click", () => {
-  $$(".seg button").forEach((x) => x.classList.toggle("active", x === b));
-  const code = b.dataset.view === "code";
-  $("#preview").hidden = code; $("#code-view").hidden = !code;
+$("#btn-undo").addEventListener("click", () => { if (build.idx > 0) { build.idx--; saveBuild(); setPreview(); } });
+$("#btn-redo").addEventListener("click", () => { if (build.idx < build.versions.length - 1) { build.idx++; saveBuild(); setPreview(); } });
+$$("#tab-builder .preview-panel .seg:not(#device-seg) button").forEach((b) => b.addEventListener("click", () => {
+  $$("#tab-builder .preview-panel .seg:not(#device-seg) button").forEach((x) => x.classList.toggle("active", x === b));
+  const isCode = b.dataset.view === "code";
+  $(".frame-wrap").hidden = isCode; $("#code-view").hidden = !isCode;
+}));
+$$("#device-seg button").forEach((b) => b.addEventListener("click", () => {
+  $$("#device-seg button").forEach((x) => x.classList.toggle("active", x === b));
+  $("#preview").style.maxWidth = b.dataset.device;
 }));
 $("#btn-download").addEventListener("click", () => {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([build.code], { type: "text/html" }));
+  a.href = URL.createObjectURL(new Blob([currentCode()], { type: "text/html" }));
   a.download = "almajhool-project.html"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
 $("#btn-copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(build.code); toast("تم نسخ الكود"); } catch { toast("تعذّر النسخ", true); }
+  try { await navigator.clipboard.writeText(currentCode()); toast("تم نسخ الكود"); } catch { toast("تعذّر النسخ", true); }
 });
 $("#btn-newtab").addEventListener("click", () => {
-  const url = URL.createObjectURL(new Blob([build.code], { type: "text/html" }));
-  window.open(url, "_blank", "noopener");
+  window.open(URL.createObjectURL(new Blob([currentCode()], { type: "text/html" })), "_blank", "noopener");
 });
-$("#btn-reset").addEventListener("click", () => { build.history = []; setPreview(""); $("#build-status").textContent = ""; });
+$("#btn-reset").addEventListener("click", () => {
+  if (currentCode() && !confirm("بدء مشروع جديد؟ الإصدارات الحالية تنمسح.")) return;
+  build.versions = []; build.idx = -1; saveBuild(); setPreview(); $("#build-status").textContent = "";
+});
 
 // ------------------------------------------------------------------ الإعدادات
 $("#set-engine-url").value = S.engineUrl; $("#set-engine-key").value = S.engineKey;
@@ -516,7 +812,10 @@ $("#btn-save").addEventListener("click", async () => {
 });
 
 // ------------------------------------------------------------------ التشغيل
-setPreview("");
+setPreview();
+renderGallery();
+renderUsage();
+if (chats.length) { currentChat = chats[chats.length - 1]; renderChatList(); renderChat(); } else newChat();
 checkConnections().then(refreshAll);
 setInterval(() => {
   const active = $(".tab.active")?.id;

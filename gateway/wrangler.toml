@@ -2,14 +2,18 @@ name = "free-ai-gateway"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 
-# توليد الصور المجاني (FLUX) عبر Workers AI
+# لا تحذف المتغيرات المضافة من لوحة Cloudflare (ACCESS_TOKEN والمفاتيح) عند كل نشر تلقائي من GitHub
+keep_vars = true
+
+# الصور + نموذج نصي احتياطي مجاني عبر Workers AI
 [ai]
 binding = "AI"
 
-# المفاتيح لا تُكتب هنا — ضعها كـ secrets:  wrangler secret put GROQ_API_KEY
+# المفاتيح لا تُكتب هنا — أضفها من لوحة Cloudflare أو:  wrangler secret put GROQ_API_KEY
 # لتغيير الموديلات عند تبدّلها:
 [vars]
 # GROQ_MODEL = "openai/gpt-oss-120b"
 # CEREBRAS_MODEL = "gpt-oss-120b"
 # GEMINI_MODEL = "gemini-2.5-flash"
 # OPENROUTER_MODEL = "openrouter/free"
+# WORKERS_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"

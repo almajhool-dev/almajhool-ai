@@ -23,6 +23,7 @@
     </div>
   </div>
   <div class="conn">
+    <span class="usage-chip" id="usage-chip" title="التوكنات المستهلكة اليوم">⚡ 0</span>
     <span class="dot" id="dot-engine" title="المحرك (الباكند)"></span><span class="conn-name">المحرك</span>
     <span class="dot" id="dot-gateway" title="البوابة المجانية"></span><span class="conn-name">البوابة</span>
   </div>
@@ -45,6 +46,16 @@
       <b>المحرك غير متصل.</b> التدريب يحتاج GPU — شغّل الباكند (Colab/Kaggle/سيرفر) ثم ضع رابطه في
       <a href="#" data-goto="settings">الإعدادات</a>. الدردشة والصور وبناء المواقع تعمل الآن عبر البوابة المجانية.
     </div>
+    <div class="panel" id="gw-panel" hidden>
+      <div class="panel-head"><h2>البوابة المجانية — الاستهلاك</h2><span class="muted" id="gw-version"></span></div>
+      <div class="cards" id="usage-cards"></div>
+      <div class="budget">
+        <div class="meter-top"><span>هدف اليوم: 10,000,000 توكن</span><span class="mono" id="budget-text"></span></div>
+        <div class="bar"><span id="budget-bar" style="width:0%"></span></div>
+      </div>
+      <div class="providers" id="provider-list"></div>
+    </div>
+    <div id="engine-dash">
     <div class="cards" id="stat-cards"></div>
     <div class="panel">
       <div class="panel-head"><h2>Training Loss</h2><span class="muted" id="loss-meta"></span></div>
@@ -61,6 +72,7 @@
           <th>الإصدار</th><th>مقارنة بـ</th><th>Perplexity قبل → بعد</th><th>دقة الأسئلة</th><th>الحكم</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
+    </div>
     </div>
   </section>
 
@@ -138,16 +150,32 @@
   <!-- ====================== الدردشة ====================== -->
   <section id="tab-chat" class="tab">
     <div class="panel chat-panel">
-      <div class="panel-head">
-        <h2>المبرمج المجهول AI</h2>
-        <select id="chat-engine"></select>
+      <div class="chat-toolbar">
+        <select id="chat-list" aria-label="المحادثات"></select>
+        <button class="btn small" id="btn-new-chat" title="محادثة جديدة">＋ جديدة</button>
+        <button class="btn small danger" id="btn-del-chat" title="حذف المحادثة">🗑</button>
       </div>
-      <div class="chat-log" id="chat-log">
-        <div class="msg assistant"><div class="bubble">أهلًا! أنا المبرمج المجهول AI. اسألني عن البرمجة، الأمن الرقمي، أو أي شي.</div></div>
+      <div class="chat-toolbar">
+        <select id="chat-mode" aria-label="الوضع">
+          <option value="general">🧠 مساعد عام</option>
+          <option value="coder">💻 مبرمج خبير</option>
+          <option value="security">🛡 أمن سيبراني</option>
+          <option value="social">📈 محتوى وسوشيال ميديا</option>
+          <option value="translator">🌐 مترجم</option>
+          <option value="teacher">🎓 معلّم يشرح خطوة بخطوة</option>
+        </select>
+        <select id="chat-engine" aria-label="المحرك"></select>
+      </div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="suggestions" id="chat-suggestions">
+        <button data-q="اشرحلي شلون أحمي حساب انستغرام من الاختراق">🛡 حماية حساب انستغرام</button>
+        <button data-q="اكتبلي كود بايثون يحلل ملف CSV ويطلع إحصائيات">💻 كود بايثون لتحليل CSV</button>
+        <button data-q="أعطني 10 أفكار فيديوهات تيك توك عن التقنية">📈 أفكار تيك توك</button>
+        <button data-q="اشرحلي الفرق بين الذكاء الاصطناعي وتعلم الآلة">🎓 AI vs ML</button>
       </div>
       <form class="chat-input" id="chat-form">
-        <textarea id="chat-text" rows="1" placeholder="اكتب رسالتك…"></textarea>
-        <button class="btn primary" type="submit">إرسال</button>
+        <textarea id="chat-text" rows="1" placeholder="اكتب رسالتك… (Enter للإرسال)"></textarea>
+        <button class="btn primary" type="submit" id="btn-send">إرسال</button>
       </form>
     </div>
   </section>
@@ -156,11 +184,39 @@
   <section id="tab-image" class="tab">
     <div class="panel">
       <div class="panel-head"><h2>توليد الصور</h2><span class="muted" id="img-engine"></span></div>
-      <form id="img-form" class="row">
-        <input id="img-prompt" placeholder="صف الصورة… (الإنجليزية تعطي نتائج أدق)" required>
-        <button class="btn primary" type="submit">✦ توليد</button>
+      <form id="img-form">
+        <textarea id="img-prompt" rows="2" placeholder="صف الصورة… مثال: هكر بقبعة سوداء أمام شاشات بإضاءة نيون زرقاء" required></textarea>
+        <div class="form-grid img-opts">
+          <label>النموذج
+            <select id="img-model">
+              <option value="flux">FLUX — أعلى جودة</option>
+              <option value="sdxl">SDXL — مقاسات مخصصة</option>
+            </select></label>
+          <label>المقاس
+            <select id="img-size">
+              <option value="1024x1024">مربع 1:1</option>
+              <option value="768x1344">طولي 9:16 (ستوري/ريلز)</option>
+              <option value="1344x768">عرضي 16:9 (يوتيوب)</option>
+              <option value="896x1152">بوست 4:5</option>
+            </select></label>
+          <label>الأسلوب
+            <select id="img-style">
+              <option value="">بدون</option>
+              <option value="cyberpunk neon style, dark background, glowing cyan and purple lights, highly detailed">سايبربنك نيون</option>
+              <option value="photorealistic, 85mm photo, natural lighting, ultra detailed, 8k">واقعي فوتوغرافي</option>
+              <option value="anime style, vibrant colors, clean line art, studio quality">أنمي</option>
+              <option value="minimal flat vector logo, centered, simple shapes, solid background, professional brand mark">شعار</option>
+              <option value="3D render, octane render, soft studio lighting, glossy materials">ثلاثي الأبعاد</option>
+              <option value="cinematic film still, dramatic lighting, shallow depth of field, color graded">سينمائي</option>
+              <option value="digital painting, concept art, artstation trending, epic composition">لوحة رقمية</option>
+            </select></label>
+          <label>العدد
+            <select id="img-count"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+        </div>
+        <label class="check"><input type="checkbox" id="img-translate" checked> ترجمة الوصف للإنجليزية وتحسينه تلقائيًا</label>
+        <div class="row"><button class="btn primary" type="submit" id="btn-img">✦ توليد</button>
+          <button class="btn" type="button" id="btn-clear-gallery">مسح المعرض</button></div>
       </form>
-      <label class="check"><input type="checkbox" id="img-translate" checked> ترجمة الوصف للإنجليزية وتحسينه تلقائيًا</label>
       <div class="gallery" id="gallery"></div>
     </div>
   </section>
@@ -168,21 +224,37 @@
   <!-- ====================== بناء المواقع ====================== -->
   <section id="tab-builder" class="tab">
     <div class="panel">
-      <div class="panel-head"><h2>بناء المواقع والتطبيقات</h2></div>
+      <div class="panel-head"><h2>بناء المواقع والتطبيقات</h2><span class="muted" id="build-version"></span></div>
+      <div class="suggestions" id="build-templates">
+        <button data-kind="website" data-q="متجر إلكتروني لبيع الإكسسوارات بثيم داكن نيون، فيه منتجات وسلة مشتريات تعمل وصفحة دفع">🛒 متجر</button>
+        <button data-kind="landing" data-q="صفحة هبوط لدورة أمن سيبراني باسم المبرمج المجهول، فيها محاور الدورة، آراء الطلاب، الأسئلة الشائعة وزر تسجيل عبر واتساب">🎓 صفحة دورة</button>
+        <button data-kind="website" data-q="بورتفوليو شخصي لمبرمج، فيه نبذة، المهارات، المشاريع بفلترة، ونموذج تواصل">👤 بورتفوليو</button>
+        <button data-kind="game" data-q="لعبة سباق سيارات ثنائية الأبعاد بإضاءة نيون، مع نقاط ومستويات وأفضل نتيجة">🎮 لعبة</button>
+        <button data-kind="webapp" data-q="تطبيق ملاحظات ومهام بالعربي، تصنيفات، بحث، وضع داكن وفاتح، وحفظ في المتصفح">📝 تطبيق مهام</button>
+        <button data-kind="dashboard" data-q="لوحة تحكم لتحليلات حسابات تيك توك: متابعين، مشاهدات، أفضل الفيديوهات، ورسوم بيانية">📊 لوحة تحليلات</button>
+      </div>
       <form id="build-form" class="form-grid">
         <label>النوع
           <select id="build-kind">
-            <option value="website">موقع</option>
+            <option value="website">موقع متعدد الأقسام</option>
             <option value="webapp">تطبيق ويب (يعمل على الجوال)</option>
             <option value="game">لعبة</option>
             <option value="dashboard">لوحة تحكم</option>
             <option value="landing">صفحة هبوط</option>
           </select></label>
         <label>المحرك <select id="build-engine"></select></label>
+        <label>الطول
+          <select id="build-size">
+            <option value="16000">عادي</option>
+            <option value="32000" selected>كبير (مع إكمال تلقائي)</option>
+            <option value="64000">ضخم جدًا</option>
+          </select></label>
         <label class="wide">الوصف
           <textarea id="build-prompt" rows="3" placeholder="مثال: متجر إلكتروني لبيع الإكسسوارات بثيم داكن نيون، فيه سلة مشتريات وصفحة منتج" required></textarea></label>
         <div class="wide row">
           <button class="btn primary" type="submit" id="btn-build">⌘ ابنِ</button>
+          <button class="btn" type="button" id="btn-undo" disabled title="الإصدار السابق">↶</button>
+          <button class="btn" type="button" id="btn-redo" disabled title="الإصدار التالي">↷</button>
           <button class="btn" type="button" id="btn-download" disabled>⬇ تحميل HTML</button>
           <button class="btn" type="button" id="btn-copy" disabled>⧉ نسخ الكود</button>
           <button class="btn" type="button" id="btn-newtab" disabled>↗ فتح بنافذة</button>
@@ -194,9 +266,10 @@
     <div class="panel preview-panel">
       <div class="panel-head">
         <div class="seg"><button class="active" data-view="preview">المعاينة</button><button data-view="code">الكود</button></div>
-        <span class="muted" id="build-meta"></span>
+        <div class="seg" id="device-seg"><button class="active" data-device="100%">🖥</button><button data-device="390px">📱</button></div>
+        <span class="muted mono" id="build-meta"></span>
       </div>
-      <iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe>
+      <div class="frame-wrap"><iframe id="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="معاينة"></iframe></div>
       <pre id="code-view" class="code" hidden></pre>
     </div>
   </section>
