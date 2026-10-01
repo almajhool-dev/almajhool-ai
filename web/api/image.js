@@ -1,5 +1,5 @@
 // الصور: توليد + حفظ دائم في قاعدة البيانات + قائمة صوري + حذف
-import { bestImage, fallbackImage, toEnglishPrompt } from "./_images.js";
+import { bestImage, fallbackImage, locateTexts, requestedTexts, toEnglishPrompt } from "./_images.js";
 import { directConfigured, directText } from "./_direct.js";
 import { HttpError, gateway, json, logUsage, randomId, requireUser, route, sql, usageToday } from "./_lib.js";
 
@@ -46,6 +46,13 @@ export const POST = route(async (request) => {
     try { data = await fallbackImage(english.slice(0, 1500), data.error); }
     catch (e) { throw new HttpError(502, e.message); }
   }
+  // الكتابة العربية المطلوبة داخل الصورة: Gemini يحدد مكانها، والمتصفح يكتبها صح فوق الحروف المخربطة
+  let overlays = [];
+  const texts = requestedTexts(english, prompt);
+  if (texts.length && hasGemini) {
+    try { overlays = await locateTexts(data.image, texts, String(prompt).slice(0, 500), gem({ max_tokens: 400 })); }
+    catch (e) { console.error("locateTexts", e.message); }
+  }
   const [meta, b64] = data.image.split(",");
   const mime = meta.slice(5, meta.indexOf(";")) || "image/jpeg";
   const bytes = Buffer.from(b64, "base64");
@@ -56,7 +63,7 @@ export const POST = route(async (request) => {
             VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${data.model || model}, ${mime}, ${bytes}, ${w}, ${h})`;
   await logUsage(user.id, "image", 0, data.provider || "workers-ai", data.model || model);
   return json({ id, url: `/i/${id}`, prompt, understood: english !== String(prompt) ? english : null,
-    provider: data.provider || null, candidates: data.candidates || 1, width: w, height: h, created_at: new Date().toISOString() });
+    provider: data.provider || null, candidates: data.candidates || 1, overlays, width: w, height: h, created_at: new Date().toISOString() });
 });
 
 export const GET = route(async (request) => {
@@ -74,4 +81,17 @@ export const DELETE = route(async (request) => {
     : await sql`DELETE FROM images WHERE id = ${id} AND user_id = ${user.id} RETURNING id`;
   if (!rows.length) throw new HttpError(404, "الصورة غير موجودة");
   return json({ deleted: id });
+});
+
+// حفظ النسخة المصححة (بعد كتابة النص العربي فوق الصورة في المتصفح)
+export const PUT = route(async (request) => {
+  const user = await requireUser(request);
+  const { id, image } = await request.json().catch(() => ({}));
+  const m = String(image || "").match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!id || !m) throw new HttpError(400, "صورة غير صالحة");
+  const bytes = Buffer.from(m[2], "base64");
+  if (bytes.length > 8 * 1024 * 1024) throw new HttpError(413, "الصورة كبيرة");
+  const rows = await sql`UPDATE images SET data = ${bytes}, mime = ${m[1]} WHERE id = ${String(id)} AND user_id = ${user.id} RETURNING id`;
+  if (!rows.length) throw new HttpError(404, "الصورة غير موجودة");
+  return json({ id, url: `/i/${id}?v=2` });
 });

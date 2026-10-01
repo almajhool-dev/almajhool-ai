@@ -8,7 +8,7 @@ export async function GET(request) {
   const rows = await sql`SELECT mime, data FROM images WHERE id = ${id}`;
   if (!rows.length) return new Response("Not found", { status: 404 });
   const { mime, data } = rows[0];
-  const headers = { "Content-Type": mime, "Cache-Control": "public, max-age=31536000, immutable" };
+  const headers = { "Content-Type": mime, "Cache-Control": "public, max-age=86400" };
   if (url.searchParams.get("dl")) {
     headers["Content-Disposition"] = `attachment; filename="almajhool-ai-${id.slice(0, 8)}.${mime.includes("png") ? "png" : "jpg"}"`;
   }

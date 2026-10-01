@@ -619,6 +619,38 @@ function detectIntent(text, hasProject = false) {
   return { type: "chat" };
 }
 
+// يكتب النص العربي الصحيح فوق مكانه بالصورة (الخط والتشكيل العربي من المتصفح نفسه، فيطلع صحيح 100%)
+async function applyOverlays(url, overlays) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  try { await document.fonts.load('800 64px "Cairo"', "ابت"); } catch { }
+  const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+  for (const o of overlays) {
+    const [y0, x0, y1, x1] = o.box;
+    let x = (x0 / 1000) * c.width, y = (y0 / 1000) * c.height, w = ((x1 - x0) / 1000) * c.width, h = ((y1 - y0) / 1000) * c.height;
+    const pad = Math.max(4, h * 0.12); x -= pad; y -= pad; w += pad * 2; h += pad * 2;
+    ctx.fillStyle = o.bg; ctx.beginPath();
+    (ctx.roundRect ? ctx.roundRect(x, y, w, h, Math.min(h * 0.18, 18)) : ctx.rect(x, y, w, h)); ctx.fill();
+    let size = h * 0.62;
+    const font = (sz) => `800 ${sz}px Cairo, "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif`;
+    ctx.font = font(size);
+    while (ctx.measureText(o.text).width > w * 0.9 && size > 8) { size -= 1; ctx.font = font(size); }
+    ctx.fillStyle = o.fg; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
+    ctx.fillText(o.text, x + w / 2, y + h / 2 + size * 0.05);
+  }
+  return c.toDataURL("image/png");
+}
+/** يصحح الكتابة إذا الخادم رجع أماكنها، ويحفظ النسخة المصححة بحسابك. يرجع رابط الصورة النهائي */
+async function fixImageText(item) {
+  if (!item.overlays?.length) return item.url;
+  try {
+    const fixed = await applyOverlays(item.url, item.overlays);
+    const r = await api("/api/image", { method: "PUT", body: { id: item.id, image: fixed } });
+    item.url = r.url; item.fixedText = true;
+    return r.url;
+  } catch (e) { console.warn("overlay failed", e); return item.url; }
+}
+
 async function chatImage(text) {
   currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
   addMsg("user", esc(text).replace(/\n/g, "<br>"));
@@ -627,10 +659,12 @@ async function chatImage(text) {
   const prompt = text; // الخادم يفهم الطلب (Gemini) ويحوله لوصف دقيق قبل الرسم
   try {
     const item = await api("/api/image", { method: "POST", body: { prompt, model: "flux", width: 1, height: 1, negative_prompt: "blurry, low quality, watermark, deformed" } });
+    if (item.overlays?.length) { content.innerHTML = '<span class="muted">✍️ أصحح الكتابة العربية بالصورة…</span> <span class="typing"></span>'; await fixImageText(item); }
     content.innerHTML = `<p>تفضل 🎨</p><a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="chat-img" src="${esc(item.url)}" alt="${esc(text)}"></a>
       ${item.understood ? `<small class="muted" dir="ltr">🧠 فهمت طلبك هيج: ${esc(item.understood)}</small>` : ""}
       ${item.provider ? `<small class="muted">🖌 رسمها: ${esc(item.provider)}${item.candidates > 1 ? ` · Gemini اختارها من ${item.candidates} صور` : ""}</small>` : ""}
-      ${/(مكتوب|اكتب|كتابة|كتابه|عليها|عليه اسم|باسم|نص)/.test(text) ? `<p class="small-print" style="color:var(--amber)">⚠️ ملاحظة: نماذج الرسم المجانية ضعيفة بكتابة الحروف العربية داخل الصورة، فممكن الكتابة تطلع غلط أو بالإنجليزي. باقي التفاصيل تطلع صح.</p>` : ""}
+      ${item.fixedText ? `<small class="muted">✍️ صححت الكتابة العربية: ${esc(item.overlays.map((o) => o.text).join("، "))}</small>`
+        : /(مكتوب|اكتب|كتابة|كتابه|عليها|عليه اسم|باسم|نص)/.test(text) ? `<p class="small-print" style="color:var(--amber)">⚠️ إذا الكتابة طلعت غلط، حط النص اللي تريده بين علامتي تنصيص، مثل: مكتوب عليها "شرطة النجدة"</p>` : ""}
       <p class="row"><a class="btn small" href="${esc(item.url)}?dl=1">⬇ حفظ</a> <button class="btn small" type="button" data-share="${esc(item.url)}">🔗 مشاركة</button></p>`;
     currentChat.messages.push({ role: "assistant", content: `![${text}](${item.url})`, meta: "صورة · FLUX" });
     galleryLoaded = false;
@@ -799,6 +833,7 @@ $("#img-form").addEventListener("submit", async (e) => {
     await Promise.all(placeholders.map(async (box) => {
       try {
         const item = await api("/api/image", { method: "POST", body: { prompt: full, model, width: w, height: h, negative_prompt: "blurry, low quality, watermark, deformed" } });
+        await fixImageText(item);
         box.replaceWith(shotEl(item));
         if (item.understood) toast("🧠 فهمت طلبك: " + item.understood.slice(0, 140));
         if (state.me) { state.me.usage.images++; renderUsage(); }

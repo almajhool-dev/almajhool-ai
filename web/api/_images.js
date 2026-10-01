@@ -217,3 +217,41 @@ export async function bestImage(prompt, request, judgeFn, extra = []) {
     return { ...results[i], candidates: results.length, judged: true, errors };
   } catch { return { ...results[0], candidates: results.length, errors }; }
 }
+
+// ------------------------------------------------------------------ تصحيح الكتابة العربية داخل الصورة
+// نماذج الرسم «تخترع» الحروف فتطلع مخربطة. نحدد النص المطلوب، وGemini يحدد مكانه بالصورة،
+// والمتصفح يغطي الكتابة الغلط ويكتب النص الصحيح بخط عربي حقيقي.
+export function requestedTexts(...sources) {
+  const out = new Set();
+  for (const src of sources) {
+    for (const m of String(src || "").matchAll(/["“«]([^"”»\n]{1,60})["”»]/g)) {
+      if (hasArabic(m[1])) out.add(m[1].trim());
+    }
+  }
+  return [...out].slice(0, 3);
+}
+
+/** يرجع [{text, box:[ymin,xmin,ymax,xmax] (0-1000), bg, fg}] أو [] */
+export async function locateTexts(imageDataUrl, texts, request, visionFn) {
+  if (!texts.length || !visionFn) return [];
+  const prompt = `This image was generated for the request: "${request}".
+The image should show this exact Arabic text: ${texts.map((t) => `"${t}"`).join(", ")}.
+Image models usually render the letters wrong. For each text, find the region where it is written (even if garbled or in English). If it is missing, choose the most natural flat surface where it should appear according to the request (e.g. a chest patch, sign or banner).
+Return ONLY JSON: [{"text": "<exact text>", "box_2d": [ymin, xmin, ymax, xmax], "bg": "#rrggbb", "fg": "#rrggbb"}]
+box_2d is normalized 0-1000 and must tightly cover the existing lettering area (patch/label), bg is that area's background color, fg is a readable text color matching the design.`;
+  const answer = String(await visionFn([{ role: "user", content: [
+    { type: "text", text: prompt },
+    { type: "image_url", image_url: { url: imageDataUrl } },
+  ] }]) || "");
+  let arr;
+  try { arr = JSON.parse((answer.match(/\[[\s\S]*\]/) || ["[]"])[0]); } catch { return []; }
+  const hex = (c, d) => (/^#[0-9a-f]{6}$/i.test(String(c || "")) ? c : d);
+  return (Array.isArray(arr) ? arr : []).map((o) => {
+    const b = (o.box_2d || o.box || []).map(Number);
+    if (b.length !== 4 || b.some((v) => !Number.isFinite(v))) return null;
+    const [y0, x0, y1, x1] = b.map((v) => Math.max(0, Math.min(1000, v)));
+    if (y1 - y0 < 15 || x1 - x0 < 30) return null;
+    const text = texts.includes(o.text) ? o.text : texts[0];
+    return { text, box: [y0, x0, y1, x1], bg: hex(o.bg, "#111111"), fg: hex(o.fg, "#ffffff") };
+  }).filter(Boolean).slice(0, 3);
+}
