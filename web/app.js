@@ -431,7 +431,7 @@ function renderProviders() {
     const tier = p.tier === 1 ? "قوي" : p.tier === 2 ? "احتياطي" : "طوارئ";
     return `<div class="prov ${p.configured ? "ok" : ""}">
       <span class="dot ${p.configured ? "on" : ""}"></span><b>${esc(p.id)}</b>${status}
-      <small class="muted">${esc(tier)} · ${p.keyless && !p.has_key ? "بدون مفتاح · " : ""}${esc(p.cap || "")}</small>
+      <small class="muted">${esc(tier)} · ${p.keyless && !p.has_key ? "بدون مفتاح · " : ""}${p.keys > 1 ? `${num(p.keys)} مفاتيح · ` : ""}${esc(p.cap || "")}</small>
       <span class="muted mono">${esc(p.model || "")}</span>
       ${p.configured ? `<small class="muted mono">✓ ${num(st.ok || 0)} · ✗ ${num(st.fail || 0)} · ${shortTokens(st.tokens || 0)} توكن${st.last_error && st.fail ? ` · آخر خطأ: ${esc(String(st.last_error).slice(0, 60))}` : ""}</small>`
         : `<small>${p.signup ? `<a href="${esc(p.signup)}" target="_blank" rel="noopener">سجّل واحصل على المفتاح ↗</a> · ` : ""}اسم المتغير: <code>${esc(p.key_var || "")}</code></small>`}
@@ -508,6 +508,7 @@ function md(text) {
     if (i % 3 === 0) {
       out += esc(parts[i])
         .replace(/^### (.*)$/gm, "<h4>$1</h4>").replace(/^## (.*)$/gm, "<h3>$1</h3>").replace(/^# (.*)$/gm, "<h3>$1</h3>")
+        .replace(/!\[([^\]\n]*)\]\(((?:https?:\/\/|\/)[^\s)"<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener"><img class="chat-img" src="$2" alt="$1" loading="lazy"></a>')
         .replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
         .replace(/^\s*[-*] (.*)$/gm, "• $1").replace(/\n/g, "<br>");
     } else if (i % 3 === 2) {
@@ -526,7 +527,7 @@ document.addEventListener("click", async (e) => {
 
 // ------------------------------------------------------------------ الدردشة
 const MODES = {
-  general: "أنت «المبرمج المجهول AI»، مساعد ذكي يتحدث العربية (واللهجة العراقية عند الحاجة) والإنجليزية. أجب بدقة ووضوح وبلغة السؤال، ونظّم الإجابة بعناوين ونقاط عند الحاجة.",
+  general: "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا يفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح، ونظّم الإجابة بعناوين ونقاط عند الحاجة. هذا الموقع يستطيع أيضًا توليد الصور وبناء مواقع وتطبيقات ونشرها برابط: إذا طلب المستخدم شيئًا من ذلك أخبره أن يكتب طلبه مباشرة مثل «ارسملي…» أو «سويلي موقع…».",
   coder: "أنت «المبرمج المجهول AI» بوضع المبرمج الخبير. اكتب كودًا كاملًا جاهزًا للتشغيل بدون اختصارات أو TODO، مع شرح مختصر بالعربية، واستخدم أفضل الممارسات والأمان.",
   security: "أنت «المبرمج المجهول AI» بوضع خبير الأمن السيبراني الدفاعي. ساعد في حماية الحسابات والأنظمة، شرح الثغرات وطرق الوقاية، والاستجابة للحوادث. لا تساعد في اختراق حسابات أو أنظمة الآخرين.",
   social: "أنت «المبرمج المجهول AI» بوضع خبير المحتوى والسوشيال ميديا. اكتب أفكار وسكربتات وكابشنات جذابة لتيك توك وانستغرام ويوتيوب، مع هاشتاغات وتوقيت نشر مناسب.",
@@ -552,7 +553,7 @@ function renderChatList() {
 function renderChat() {
   const log = $("#chat-log"); log.innerHTML = "";
   if (!currentChat.messages.length) {
-    addMsg("assistant", md("أهلًا! أنا **المبرمج المجهول AI** 👋\nاختار الوضع اللي يناسبك من فوق، واسألني أي شي — برمجة، أمن رقمي، محتوى، ترجمة."));
+    addMsg("assistant", md("أهلًا! أنا **المبرمج المجهول AI** 👋\nاكتبلي أي شي تريده بالعربي وأنا أفهمه وأسويه:\n- 🎨 **«ارسملي قطة لابسة نظارات بستايل أنمي»** → أرسم الصورة هنا\n- ⌘ **«سويلي موقع متجر عطور بثيم أسود وذهبي»** → أبني الموقع وأنشره برابط\n- 💬 أي سؤال ثاني → برمجة، أمن رقمي، محتوى، ترجمة، شرح"));
   }
   for (const m of currentChat.messages) addMsg(m.role, m.role === "user" ? esc(m.content).replace(/\n/g, "<br>") : md(m.content), m.meta);
   $("#chat-mode").value = currentChat.mode || "general";
@@ -576,8 +577,72 @@ $("#chat-suggestions").addEventListener("click", (e) => {
   $("#chat-text").value = b.dataset.q; $("#chat-form").requestSubmit();
 });
 
+// ------------------------------------------------------------------ فهم الطلب تلقائيًا: صورة؟ موقع؟ أو دردشة
+// يفهم الفصحى واللهجات (سويلي، اريد، ابي، ابغى، عايز…) ويتجاهل الأسئلة مثل «شلون أسوي موقع؟»
+const AR_ASK = /(^|\s)(شلون|كيف|ليش|لماذا|شنو|شو|ما هو|ما هي|ماهو|وش|ايش|إيش|اشرح|اشرحلي|هل)(\s|$)/;
+const AR_WANT = /(سوي|سوّي|اسوي|سويلي|سوّيلي|سولي|اعمل|اعملي|اعملّي|إعمل|ابني|ابنِ|ابنيلي|صمم|صمّم|صممي|صمملي|صمّملي|اريد|أريد|اريدك|ابي|أبي|ابغى|أبغى|عايز|عاوز|بدي|انشئ|أنشئ|اصنع|حضر|حضّر|جهز|جهّز|اكتب|create|make|build|design|generate)/i;
+const AR_DRAW = /(ارسم|إرسم|ارسملي|ارسمي|ارسمني|draw|paint|صور(ة|ه)? ل|صوره ل|لوگو|لوجو|لوغو|logo|شعار|خلفية|خلفيه|wallpaper|بوستر|poster|غلاف|ثمبنيل|thumbnail|أفاتار|افتار|avatar)/i;
+const AR_IMG = /(صور(ة|ه)|صورة|image|picture|photo|رسمة|رسمه)/i;
+const AR_SITE = [
+  ["game", /(لعب(ة|ه)|game)/i],
+  ["dashboard", /(لوح(ة|ه) تحكم|داشبورد|dashboard|لوح(ة|ه) تحليلات)/i],
+  ["landing", /(صفح(ة|ه) هبوط|لاندنج|landing)/i],
+  ["webapp", /(تطبيق|ابلكيشن|\bapp\b|حاسب(ة|ه)|آل(ة|ه) حاسب(ة|ه))/i],
+  ["website", /(موقع|متجر|ستور|store|website|site|بورتفوليو|portfolio|مدون(ة|ه)|صفح(ة|ه) (ويب|شخصي(ة|ه)))/i],
+];
+function detectIntent(text) {
+  const t = text.trim();
+  if (t.length > 1500 || AR_ASK.test(t)) return { type: "chat" };
+  if (AR_DRAW.test(t) || (AR_WANT.test(t) && AR_IMG.test(t))) return { type: "image" };
+  if (AR_WANT.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) return { type: "site", kind };
+  return { type: "chat" };
+}
+
+async function chatImage(text) {
+  currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
+  addMsg("user", esc(text).replace(/\n/g, "<br>"));
+  const bubble = addMsg("assistant", '<span class="muted">🎨 جاري رسم الصورة…</span> <span class="typing"></span>');
+  const content = bubble.querySelector(".content");
+  let prompt = text;
+  try {
+    const r = await llmStream([{ role: "system", content: "Rewrite the user's image request (any Arabic dialect or English) as one vivid, specific English prompt for a text-to-image model (max 70 words). Remove words like 'draw me' / 'ارسملي'. Keep any text that must appear in the image in quotes. Output only the prompt." }, { role: "user", content: text }], "gw:auto", { maxTokens: 300 });
+    if (r.text.trim()) prompt = r.text.trim().replace(/^["']|["']$/g, "");
+  } catch { /* نكمل بالوصف الأصلي */ }
+  try {
+    const item = await api("/api/image", { method: "POST", body: { prompt, model: "flux", width: 1, height: 1, negative_prompt: "blurry, low quality, watermark, deformed" } });
+    content.innerHTML = `<p>تفضل 🎨</p><a href="${esc(item.url)}" target="_blank" rel="noopener"><img class="chat-img" src="${esc(item.url)}" alt="${esc(text)}"></a>
+      <p class="row"><a class="btn small" href="${esc(item.url)}?dl=1">⬇ حفظ</a> <button class="btn small" type="button" data-share="${esc(item.url)}">🔗 مشاركة</button></p>`;
+    currentChat.messages.push({ role: "assistant", content: `![${text}](${item.url})`, meta: "صورة · FLUX" });
+    galleryLoaded = false;
+    if (state.me) { state.me.usage.images++; renderUsage(); }
+  } catch (err) {
+    content.innerHTML = `<span class="b-red">${esc(err.message)}</span>`;
+  }
+  saveChats(); $("#chat-log").scrollTop = 1e9;
+}
+
+function chatSite(text, kind) {
+  currentChat.messages.push({ role: "user", content: text }, { role: "assistant", content: "⌘ فهمت — رحت أبني لك هذا بقسم «بناء ونشر». بعد ما يخلص اضغط «🚀 انشر» وتاخذ رابط تشاركه.", meta: "بناء تلقائي" });
+  saveChats(); renderChatList(); renderChat();
+  // عندك مشروع مفتوح؟ «موافق» = مشروع جديد · «إلغاء» = نطبّق الطلب كتعديل على المشروع الحالي
+  if (!currentCode() || confirm("عندك مشروع مفتوح بقسم البناء. تبدأ مشروع جديد بهذا الطلب؟\n(إلغاء = تعديل المشروع الحالي)")) {
+    build.versions = []; build.idx = -1; build.slug = null; saveBuild(); setPreview();
+    $("#build-status").textContent = ""; $("#publish-box").hidden = true;
+  }
+  showTab("builder");
+  $("#build-kind").value = kind;
+  $("#build-prompt").value = text;
+  $("#build-form").requestSubmit();
+}
+
 async function sendChat(text) {
   const engine = $("#chat-engine").value; if (!engine) return toast("اضبط البوابة أو المحرك في الإعدادات", true);
+  if (currentChat.mode !== "translator") {
+    const intent = detectIntent(text);
+    if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
+    if (intent.type === "image") return chatImage(text);
+    if (intent.type === "site") return chatSite(text, intent.kind);
+  }
   if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
   currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
   addMsg("user", esc(text).replace(/\n/g, "<br>"));

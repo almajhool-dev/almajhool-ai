@@ -22,6 +22,44 @@ wrangler secret put OPENROUTER_API_KEY  # https://openrouter.ai/keys
 wrangler deploy
 ```
 
+### كل المصادر المجانية المدعومة (22 مصدر نصي)
+
+بدون مفتاح، تشتغل فورًا: Kilo، LLM7، OVHcloud، Pollinations، وWorkers AI (احتياط).
+
+كل مفتاح تضيفه يزيد السعة اليومية. البوابة توزّع الطلبات عليها بالتناوب، وإذا وصل مصدر حده تنتقل للي بعده تلقائيًا.
+
+| المصدر | المتغير | من وين تجيب المفتاح |
+|---|---|---|
+| Cerebras | `CEREBRAS_API_KEY` | https://cloud.cerebras.ai |
+| Groq | `GROQ_API_KEY` | https://console.groq.com/keys |
+| Google Gemini | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
+| NVIDIA NIM | `NVIDIA_API_KEY` | https://build.nvidia.com |
+| Mistral | `MISTRAL_API_KEY` | https://console.mistral.ai/api-keys |
+| Z.ai (GLM) | `ZAI_API_KEY` | https://z.ai/manage-apikey/apikey-list |
+| OpenRouter | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
+| GitHub Models | `GITHUB_MODELS_TOKEN` | https://github.com/settings/personal-access-tokens (صلاحية Models) |
+| SambaNova | `SAMBANOVA_API_KEY` | https://cloud.sambanova.ai/apis |
+| Cohere | `COHERE_API_KEY` | https://dashboard.cohere.com/api-keys |
+| Cloudflare (حساب ثاني) | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com/profile/api-tokens |
+| Hugging Face | `HF_TOKEN` | https://huggingface.co/settings/tokens |
+| Scaleway | `SCALEWAY_API_KEY` | https://console.scaleway.com/iam/api-keys |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | https://vercel.com/dashboard/ai-gateway |
+| Nebius | `NEBIUS_API_KEY` | https://studio.nebius.com/settings/api-keys |
+| Hyperbolic | `HYPERBOLIC_API_KEY` | https://app.hyperbolic.xyz/settings |
+| Kilo / LLM7 / OVH / Pollinations | `KILO_API_KEY` … (اختياري) | تشتغل بدونه، والمفتاح يرفع الحد |
+
+**عدة مفاتيح لنفس المصدر:** ضعها مفصولة بفاصلة، مثل `GROQ_API_KEY="key1,key2"`. إذا وصل مفتاح حده، تنتقل البوابة للمفتاح الثاني بنفس الطلب. استخدمها لمفاتيح فريقك أو مشاريعك. لا تفتح حسابات وهمية متعددة، لأن أغلب المنصات تمنع هذا بشروطها وتحظر الحسابات.
+
+**أي مصدر جديد متوافق مع OpenAI** تضيفه بدون تعديل الكود، عن طريق المتغير `EXTRA_PROVIDERS`:
+
+```json
+[{"id":"myapi","url":"https://host/v1","key":"MYAPI_KEY","models":["model-name"],"cap":"وصف السعة"}]
+```
+
+**إذا تغيّرت أسماء النماذج:** ضع `<ID>_MODELS`، مثل `GITHUB_MODELS="openai/gpt-4.1,openai/gpt-4o"`.
+
+**مصادر الصور (تنتقل بينها تلقائيًا):** Workers AI (10,000 neurons يوميًا)، ثم حساب Cloudflare ثاني (`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`)، ثم Hugging Face (`HF_TOKEN`)، ثم Together (`TOGETHER_API_KEY`)، ثم Pollinations بدون مفتاح. إذا خلصت حصة مصدر اليومية، يتوقف لحد منتصف الليل UTC.
+
 مفتاح واحد يكفي للبداية. توليد الصور يعمل عبر Workers AI (FLUX) وما يحتاج مفتاح، فقط حساب Cloudflare.
 
 بعد النشر افتح اللوحة، ثم **الإعدادات ← البوابة المجانية**، وضع الرابط والـ ACCESS_TOKEN.
