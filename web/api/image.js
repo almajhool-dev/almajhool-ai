@@ -32,7 +32,7 @@ export const POST = route(async (request) => {
     if (!r.ok || !d.image) throw new Error("gateway: " + String(d.error || r.status).slice(0, 120));
     return { ...d, provider: d.provider || "workers-ai" };
   };
-  try { data = await bestImage(english, String(prompt).slice(0, 1000), hasGemini ? gem({ max_tokens: 50 }) : null, [viaGateway]); }
+  try { data = await bestImage(english, String(prompt).slice(0, 1000), hasGemini ? gem({ max_tokens: 50, prefer: ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"], timeout: 45_000 }) : null, [viaGateway]); }
   catch (e) { data = { error: e.message }; }
   // 3) احتياط: البوابة ثم باقي المصادر المجانية
   if (!data.image) {
@@ -50,7 +50,7 @@ export const POST = route(async (request) => {
   let overlays = [];
   const texts = requestedTexts(english, prompt);
   if (texts.length && hasGemini) {
-    try { overlays = await locateTexts(data.image, texts, String(prompt).slice(0, 500), gem({ max_tokens: 400 })); }
+    try { overlays = await locateTexts(data.image, texts, String(prompt).slice(0, 500), gem({ max_tokens: 400, timeout: 45_000 })); }
     catch (e) { console.error("locateTexts", e.message); }
   }
   const [meta, b64] = data.image.split(",");
