@@ -83,3 +83,22 @@ jobs:
             const en = await toEnglishPrompt(req, (m) => directText(m, { max_tokens: 600, temperature: 0.5 }));
             console.log('PMF_PROMPT', en);
             if (/He designed|rather Arabic/.test(en)) { console.log('FELL BACK TO GOOGLE TRANSLATE'); process.exitCode = 1; }"
+      - name: Gemini finds where the Arabic text goes (real key)
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY not set — skipping"; exit 0; fi
+          node --input-type=module -e "
+            import { bestImage, locateTexts, requestedTexts } from './web/api/_images.js';
+            import { directText } from './web/api/_direct.js';
+            const req = 'ارسملي شرطي لابس سترة سوداء ومكتوب على صدره شرطة النجدة';
+            const en = 'Photorealistic Iraqi police officer in navy blue camouflage uniform wearing a black tactical vest; a black patch on the chest of the vest reads \"شرطة النجدة\" in white Arabic letters; city street background, golden hour.';
+            const texts = requestedTexts(en, req);
+            console.log('TEXTS', JSON.stringify(texts));
+            const img = await bestImage(en, req, null);
+            console.log('IMAGE', img.provider, img.image.length);
+            const t = Date.now();
+            const boxes = await locateTexts(img.image, texts, req, (m) => directText(m, { max_tokens: 400 }));
+            console.log('LOCATE', ((Date.now() - t) / 1000).toFixed(1) + 's', JSON.stringify(boxes));
+            if (!boxes.length) process.exitCode = 1;"
