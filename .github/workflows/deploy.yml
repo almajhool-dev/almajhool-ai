@@ -57,6 +57,16 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.check.outputs.ok == 'true'
         with: { node-version: 22 }
+      - name: Smoke test free image sources (real network)
+        if: steps.check.outputs.ok == 'true'
+        continue-on-error: true
+        run: |
+          node --input-type=module -e "
+            import { fallbackImage } from './web/api/_images.js';
+            const t = Date.now();
+            try { const r = await fallbackImage('a red apple on a wooden table, photo', 'skip-gateway');
+                  console.log('IMAGE_OK', r.provider, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
+            catch (e) { console.log('IMAGE_FAIL', e.message); process.exitCode = 1; }"
       - name: vercel deploy --prod
         if: steps.check.outputs.ok == 'true'
         run: |

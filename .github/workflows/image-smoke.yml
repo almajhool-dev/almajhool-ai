@@ -1,0 +1,23 @@
+name: Image sources smoke test
+
+# يجرّب مصادر الصور المجانية من شبكة حقيقية (خوادم GitHub) عند كل تعديل عليها — بدون نشر
+on:
+  push:
+    paths: ["web/api/_images.js", ".github/workflows/image-smoke.yml"]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Generate one real image via the free fallback chain
+        run: |
+          node --input-type=module -e "
+            import { fallbackImage } from './web/api/_images.js';
+            const t = Date.now();
+            try { const r = await fallbackImage('a red apple on a wooden table, photo', 'skip-gateway');
+                  console.log('IMAGE_OK', r.provider, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
+            catch (e) { console.log('IMAGE_FAIL', e.message); process.exitCode = 1; }"
