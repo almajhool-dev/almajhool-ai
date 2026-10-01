@@ -89,6 +89,7 @@ jobs:
       GEMINI_MODELS: ${{ secrets.GEMINI_MODELS }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       BEST_OF: ${{ secrets.BEST_OF }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
     steps:
@@ -132,7 +133,21 @@ jobs:
           if [ "$ROOT" = "web" ]; then DIR=.; else DIR=web; fi
           cd "$DIR"
           ENVS=()
-          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN BEST_OF; do
+          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN BEST_OF TELEGRAM_BOT_TOKEN; do
             if [ -n "${!K}" ]; then ENVS+=(-e "$K=${!K}"); echo "passing $K to the site"; fi
           done
           npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" "${ENVS[@]}"
+      # بوت تلكرام: إذا السر TELEGRAM_BOT_TOKEN موجود نربط البوت بالموقع ونضبط اسمه وأوامره تلقائيًا
+      - name: Connect Telegram bot
+        if: steps.check.outputs.ok == 'true' && env.TELEGRAM_BOT_TOKEN != ''
+        run: |
+          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          SECRET=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+          curl -fsS "$API/setWebhook" -H 'Content-Type: application/json' \
+            -d "{\"url\":\"https://almajhool-ai.vercel.app/api/telegram\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\"],\"drop_pending_updates\":false}" | jq -c '{ok, description}'
+          curl -fsS "$API/setMyCommands" -H 'Content-Type: application/json' \
+            -d '{"commands":[{"command":"start","description":"شلون أستخدم البوت"},{"command":"new","description":"ابدأ من جديد (موقع ومحادثة جديدة)"},{"command":"help","description":"أمثلة على الطلبات"}]}' | jq -c '{ok}'
+          curl -fsS "$API/setMyDescription" -H 'Content-Type: application/json' \
+            -d '{"description":"البوت الرسمي لـ «المبرمج المجهول AI»: اسأل أي سؤال، ارسم صور بكتابة عربية صحيحة، وابني وانشر مواقع — كله بالعربي ومجانًا."}' | jq -c '{ok}'
+          curl -fsS "$API/getMe" | jq -r '"Bot: @" + .result.username'
+          curl -fsS "$API/getWebhookInfo" | jq -c '.result | {url, pending_update_count, last_error_message}'

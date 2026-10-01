@@ -34,6 +34,10 @@
     },
     "api/image.js": {
       "maxDuration": 300
+    },
+    "api/telegram.js": {
+      "maxDuration": 300,
+      "includeFiles": "fonts/**"
     }
   }
 }
