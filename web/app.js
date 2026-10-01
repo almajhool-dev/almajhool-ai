@@ -509,6 +509,7 @@ function md(text) {
       out += esc(parts[i])
         .replace(/^### (.*)$/gm, "<h4>$1</h4>").replace(/^## (.*)$/gm, "<h3>$1</h3>").replace(/^# (.*)$/gm, "<h3>$1</h3>")
         .replace(/!\[([^\]\n]*)\]\(((?:https?:\/\/|\/)[^\s)"<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener"><img class="chat-img" src="$2" alt="$1" loading="lazy"></a>')
+        .replace(/(^|[\s>])(https?:\/\/[^\s<"]+)/g, '$1<a class="build-link" href="$2" target="_blank" rel="noopener">$2</a>')
         .replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
         .replace(/^\s*[-*] (.*)$/gm, "• $1").replace(/\n/g, "<br>");
     } else if (i % 3 === 2) {
@@ -549,17 +550,30 @@ function newChat() {
 function renderChatList() {
   $("#chat-list").innerHTML = chats.slice().reverse().map((c) => `<option value="${c.id}">${esc(c.title)}</option>`).join("");
   if (currentChat) $("#chat-list").value = currentChat.id;
+  $("#side-chats").innerHTML = chats.slice().reverse().map((c) =>
+    `<button type="button" class="side-item ${c === currentChat ? "active" : ""}" data-chat="${c.id}">💬 ${esc(c.title)}</button>`).join("");
 }
 function renderChat() {
   const log = $("#chat-log"); log.innerHTML = "";
   if (!currentChat.messages.length) {
-    addMsg("assistant", md("أهلًا! أنا **المبرمج المجهول AI** 👋\nاكتبلي أي شي تريده بالعربي وأنا أفهمه وأسويه:\n- 🎨 **«ارسملي قطة لابسة نظارات بستايل أنمي»** → أرسم الصورة هنا\n- ⌘ **«سويلي موقع متجر عطور بثيم أسود وذهبي»** → أبني الموقع وأنشره برابط\n- 💬 أي سؤال ثاني → برمجة، أمن رقمي، محتوى، ترجمة، شرح"));
+    log.innerHTML = `<div class="hero">
+      <h2>شنو تريد نسوي اليوم؟ <span class="neon">✦</span></h2>
+      <p>اكتب طلبك بالعربي وأنا أسويه: أبني موقع وأنشره برابط، أرسم صورة، أو أجاوب على أي سؤال.</p>
+      <div class="hero-chips">
+        <button type="button" data-q="ابنيلي موقع متجر عطور فخم بثيم أسود وذهبي، فيه منتجات وسلة مشتريات">🌐 متجر عطور</button>
+        <button type="button" data-q="ابنيلي صفحة هبوط لدورة أمن سيبراني، فيها محاور الدورة وآراء الطلاب وزر تسجيل واتساب">🎓 صفحة دورة</button>
+        <button type="button" data-q="سويلي تطبيق ملاحظات ومهام بالعربي مع وضع داكن وحفظ تلقائي">📱 تطبيق مهام</button>
+        <button type="button" data-q="سويلي لعبة ثعبان بإضاءة نيون مع نقاط ومستويات">🎮 لعبة</button>
+        <button type="button" data-q="ارسملي أسد لابس تاج ذهبي، بستايل واقعي، خلفية صحراء وقت الغروب">🎨 صورة أسد</button>
+        <button type="button" data-q="اشرحلي شلون أحمي حسابي بالانستغرام من الاختراق">💬 سؤال</button>
+      </div></div>`;
   }
   for (const m of currentChat.messages) addMsg(m.role, m.role === "user" ? esc(m.content).replace(/\n/g, "<br>") : md(m.content), m.meta);
   $("#chat-mode").value = currentChat.mode || "general";
   $("#chat-suggestions").hidden = currentChat.messages.length > 0;
 }
 function addMsg(role, html, meta = "") {
+  $("#chat-log .hero")?.remove();
   const d = document.createElement("div"); d.className = "msg " + role;
   d.innerHTML = `<div class="bubble"><div class="content">${html}</div>${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</div>`;
   $("#chat-log").appendChild(d); $("#chat-log").scrollTop = 1e9; return d;
@@ -590,11 +604,18 @@ const AR_SITE = [
   ["webapp", /(تطبيق|ابلكيشن|\bapp\b|حاسب(ة|ه)|آل(ة|ه) حاسب(ة|ه))/i],
   ["website", /(موقع|متجر|ستور|store|website|site|بورتفوليو|portfolio|مدون(ة|ه)|صفح(ة|ه) (ويب|شخصي(ة|ه)))/i],
 ];
-function detectIntent(text) {
+// تعديل على الموقع المفتوح: «غيّر اللون»، «ضيف قسم»، «شيل الزر»، «خلي الخط أكبر»…
+const AR_EDIT = /(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|زيد|زوّد|شيل|احذف|امسح|خلي|خلّي|كبر|كبّر|صغر|صغّر|عدل|عدّل|حسن|حسّن|صلح|صلّح|رتب|رتّب|حرك|حرّك|ترجم الموقع|change|add|remove|make it|fix)/i;
+const AR_NEW = /(موقع جديد|مشروع جديد|تطبيق جديد|لعبة جديدة|من جديد|new site|new project)/i;
+function detectIntent(text, hasProject = false) {
   const t = text.trim();
   if (t.length > 1500 || AR_ASK.test(t)) return { type: "chat" };
   if (AR_DRAW.test(t) || (AR_WANT.test(t) && AR_IMG.test(t))) return { type: "image" };
-  if (AR_WANT.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) return { type: "site", kind };
+  if (AR_WANT.test(t) || AR_NEW.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) {
+    // «سويلي موقع…» وعندك مشروع: إذا قال «جديد» نبدأ مشروع جديد، وإلا نعتبره طلب موقع جديد أيضًا
+    return { type: "site", kind, fresh: true };
+  }
+  if (hasProject && AR_EDIT.test(t)) return { type: "edit" };
   return { type: "chat" };
 }
 
@@ -618,27 +639,48 @@ async function chatImage(text) {
   saveChats(); $("#chat-log").scrollTop = 1e9;
 }
 
-function chatSite(text, kind) {
-  currentChat.messages.push({ role: "user", content: text }, { role: "assistant", content: "⌘ فهمت — رحت أبني لك هذا بقسم «بناء ونشر». بعد ما يخلص اضغط «🚀 انشر» وتاخذ رابط تشاركه.", meta: "بناء تلقائي" });
-  saveChats(); renderChatList(); renderChat();
-  // عندك مشروع مفتوح؟ «موافق» = مشروع جديد · «إلغاء» = نطبّق الطلب كتعديل على المشروع الحالي
-  if (!currentCode() || confirm("عندك مشروع مفتوح بقسم البناء. تبدأ مشروع جديد بهذا الطلب؟\n(إلغاء = تعديل المشروع الحالي)")) {
-    build.versions = []; build.idx = -1; build.slug = null; saveBuild(); setPreview();
-    $("#build-status").textContent = ""; $("#publish-box").hidden = true;
+async function chatSite(text, kind, { fresh = true } = {}) {
+  if (fresh) { build.versions = []; build.idx = -1; build.slug = null; saveBuild(); setPreview(); }
+  currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
+  addMsg("user", esc(text).replace(/\n/g, "<br>"));
+  const bubble = addMsg("assistant", `<div class="build-steps">${fresh ? "⌘ رحت أبني مشروعك…" : "✎ رحت أعدّل موقعك…"} <span class="typing"></span></div>`);
+  const content = bubble.querySelector(".content");
+  const btn = $("#btn-send"); btn.textContent = "■"; btn.classList.add("danger");
+  chatAbort = new AbortController();
+  try {
+    const r = await generateSite(text, kind, { signal: chatAbort.signal, onStatus: (s) => {
+      content.innerHTML = `<div class="build-steps">${esc(s)} <span class="typing"></span></div>`; $("#chat-log").scrollTop = 1e9;
+    } });
+    content.innerHTML = `<div class="build-steps">✓ خلص البناء — جاري النشر برابط… <span class="typing"></span></div>`;
+    let url = null;
+    try { url = await publishCurrent(); } catch (e) { toast("ما كدرت أنشره: " + e.message, true); }
+    const msg = url
+      ? `${fresh ? "✅ موقعك جاهز ومنشور!" : "✅ عدّلت موقعك ونشرت التحديث على نفس الرابط!"}\n${url}\nاطلب أي تعديل هنا، مثل: «غيّر اللون للأزرق» أو «ضيف قسم آراء العملاء».`
+      : `${fresh ? "✅ موقعك جاهز!" : "✅ عدّلت موقعك!"} شوفه بالمعاينة، واضغط «🚀 نشر» حتى تاخذ رابط.`;
+    currentChat.messages.push({ role: "assistant", content: msg, meta: r.label });
+    content.innerHTML = md(msg) + buildCardHtml(url);
+  } catch (err) {
+    content.innerHTML = err.name === "AbortError" ? "أُوقف البناء." : `<span class="b-red">${esc(err.message)}</span>`;
   }
-  showTab("builder");
-  $("#build-kind").value = kind;
-  $("#build-prompt").value = text;
-  $("#build-form").requestSubmit();
+  saveChats(); chatAbort = null; btn.textContent = "↑"; btn.classList.remove("danger");
+  $("#chat-log").scrollTop = 1e9;
+}
+function buildCardHtml(url) {
+  return `<div class="build-card"><div class="row">
+    <button class="btn small" type="button" data-open-preview>👁 المعاينة</button>
+    ${url ? `<a class="btn small primary" href="${esc(url)}" target="_blank" rel="noopener">↗ افتح الموقع</a>
+    <button class="btn small" type="button" data-copy="${esc(url)}">⧉ نسخ الرابط</button>` : ""}
+  </div></div>`;
 }
 
 async function sendChat(text) {
   const engine = $("#chat-engine").value; if (!engine) return toast("اضبط البوابة أو المحرك في الإعدادات", true);
   if (currentChat.mode !== "translator") {
-    const intent = detectIntent(text);
+    const intent = detectIntent(text, !!currentCode());
     if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
     if (intent.type === "image") return chatImage(text);
-    if (intent.type === "site") return chatSite(text, intent.kind);
+    if (intent.type === "site") return chatSite(text, intent.kind, { fresh: true });
+    if (intent.type === "edit") return chatSite(text, null, { fresh: false });
   }
   if (!currentChat.messages.length) currentChat.title = text.slice(0, 40);
   currentChat.messages.push({ role: "user", content: text }); saveChats(); renderChatList();
@@ -646,7 +688,7 @@ async function sendChat(text) {
   $("#chat-suggestions").hidden = true;
   const bubble = addMsg("assistant", '<span class="typing"></span>');
   const content = bubble.querySelector(".content");
-  const btn = $("#btn-send"); btn.textContent = "■ إيقاف"; btn.classList.add("danger");
+  const btn = $("#btn-send"); btn.textContent = "■"; btn.classList.add("danger");
   chatAbort = new AbortController();
   let partial = "";
   try {
@@ -680,7 +722,7 @@ async function sendChat(text) {
     }
   }
   saveChats();
-  chatAbort = null; btn.textContent = "إرسال"; btn.classList.remove("danger");
+  chatAbort = null; btn.textContent = "↑"; btn.classList.remove("danger");
   $("#chat-log").scrollTop = 1e9;
 }
 $("#chat-form").addEventListener("submit", (e) => {
@@ -772,13 +814,13 @@ const KIND = {
 };
 const build = (() => {
   let saved = {}; try { saved = JSON.parse(store.get("build", "{}")) || {}; } catch { }
-  return { versions: saved.versions || [], idx: saved.idx ?? -1, slug: saved.slug || null, abort: null };
+  return { versions: saved.versions || [], idx: saved.idx ?? -1, slug: saved.slug || null, url: saved.url || null, abort: null };
 })();
 const currentCode = () => build.versions[build.idx]?.code || "";
 function saveBuild() {
   const keep = build.versions.slice(-8);
   const idx = Math.min(build.idx, keep.length - 1);
-  try { store.set("build", JSON.stringify({ versions: keep, idx, slug: build.slug })); } catch { try { store.set("build", JSON.stringify({ versions: keep.slice(-2), idx: Math.min(idx, 1), slug: build.slug })); } catch { } }
+  try { store.set("build", JSON.stringify({ versions: keep, idx, slug: build.slug, url: build.url })); } catch { try { store.set("build", JSON.stringify({ versions: keep.slice(-2), idx: Math.min(idx, 1), slug: build.slug, url: build.url })); } catch { } }
 }
 function extractHtml(text) {
   const m = text.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
@@ -789,7 +831,14 @@ function extractHtml(text) {
 }
 function setPreview() {
   const code = currentCode();
-  $("#preview").srcdoc = code;
+  document.body.classList.toggle("has-project", !!code);
+  if ($("#preview").srcdoc !== code) $("#preview").srcdoc = code;
+  $("#sp-title").textContent = code ? `${(code.match(/<title>([^<]{1,80})<\/title>/i)?.[1] || "مشروعك").trim()} · إصدار ${build.idx + 1}/${build.versions.length}` : "المعاينة";
+  $("#sp-undo").disabled = build.idx <= 0;
+  $("#sp-redo").disabled = build.idx >= build.versions.length - 1;
+  $("#sp-url").hidden = !build.url;
+  if (build.url) { $("#sp-url-a").href = build.url; $("#sp-url-a").textContent = build.url.replace(/^https?:\/\//, ""); $("#sp-open").href = build.url; }
+  else $("#sp-open").removeAttribute("href");
   $("#code-view").textContent = code;
   for (const id of ["#btn-download", "#btn-copy", "#btn-newtab", "#btn-publish"]) $(id).disabled = !code;
   $("#btn-undo").disabled = build.idx <= 0;
@@ -806,13 +855,15 @@ $("#build-templates").addEventListener("click", (e) => {
   $("#build-kind").value = b.dataset.kind; $("#build-prompt").value = b.dataset.q; $("#build-form").requestSubmit();
 });
 
-$("#build-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (build.abort) { build.abort.abort(); return; }
-  const req = $("#build-prompt").value.trim(); if (!req) return;
-  const engine = $("#build-engine").value; if (!engine) return toast("اضبط البوابة أو المحرك في الإعدادات", true);
-  const kind = $("#build-kind").value; const budget = +$("#build-size").value;
-  const system = `You are a world-class front-end engineer and UI designer. Build ${KIND[kind]}.
+// يخمّن نوع المشروع من الطلب
+function kindFor(text) {
+  for (const [kind, re] of AR_SITE) if (re.test(text)) return kind;
+  return "website";
+}
+/** يبني (أو يعدّل) المشروع ويضيفه كإصدار جديد — يُستخدم من الدردشة ومن قسم البناء */
+async function generateSite(req, kind, { signal, onStatus, engine = "gw:auto", budget = 32000 } = {}) {
+  kind = kind || kindFor(req);
+  const system = `You are a world-class front-end engineer and UI designer. Build ${KIND[kind] || KIND.website}.
 Rules:
 - Output ONE complete self-contained HTML file inside a single \`\`\`html code block — inline <style> and <script>, no build step.
 - Production quality: responsive (mobile first), accessible, modern polished design with smooth micro-interactions, real working features (no placeholder TODOs, no lorem ipsum unless asked).
@@ -823,37 +874,56 @@ Rules:
   const base = code
     ? [{ role: "system", content: system }, { role: "user", content: `Current file:\n\`\`\`html\n${code}\n\`\`\`\nApply this change and return the FULL updated file: ${req}` }]
     : [{ role: "system", content: system }, { role: "user", content: req }];
+  let full = "", label = "", rounds = 0, messages = base;
+  for (;;) {
+    rounds++;
+    const r = await llmStream(messages, engine, {
+      maxTokens: Math.min(budget, 32000), signal, temperature: 0.4,
+      onDelta: (t, _p, thinking) => onStatus?.(thinking && !t ? "🤔 يخطط للمشروع…" : `✍ يكتب الكود… ${(full.length + t.length).toLocaleString("en-US")} حرف${rounds > 1 ? ` (جزء ${rounds})` : ""}`),
+    });
+    full += r.text; label = r.label;
+    // إكمال تلقائي إذا انقطع الكود بسبب حد التوكنات
+    const unfinished = r.finish === "length" || (!/<\/html>\s*(```)?\s*$/i.test(full.trim()) && /<html|<!doctype/i.test(full));
+    if (!unfinished || rounds >= 6 || full.length > budget * 4) break;
+    onStatus?.(`↻ الكود طويل — أكمل الجزء ${rounds + 1}…`);
+    messages = [...base, { role: "assistant", content: full },
+      { role: "user", content: "Continue EXACTLY from where you stopped. Do not repeat anything and do not restart the code block — output only the remaining code." }];
+  }
+  let html = extractHtml(full);
+  if (!/<html|<body|<div/i.test(html)) throw new Error("النموذج لم يرجع HTML صالحًا — جرّب مرة ثانية");
+  if (!/<\/html>/i.test(html)) html += "\n</body></html>";
+  build.versions = build.versions.slice(0, build.idx + 1);
+  build.versions.push({ req, code: html, t: Date.now(), kind });
+  build.idx = build.versions.length - 1;
+  saveBuild(); setPreview();
+  return { html, label, rounds };
+}
+/** ينشر الإصدار الحالي (أو يحدّث نفس الرابط) ويرجع الرابط */
+async function publishCurrent() {
+  const code = currentCode(); if (!code) throw new Error("ما في مشروع");
+  const v = build.versions[build.idx];
+  const title = (code.match(/<title>([^<]{1,120})<\/title>/i)?.[1] || build.versions[0]?.req || "مشروعي").trim().slice(0, 120);
+  const r = await api("/api/sites", { method: "POST", body: { html: code, title, kind: v?.kind || kindFor(v?.req || ""), prompt: v?.req, slug: build.slug || undefined } });
+  build.slug = r.slug; build.url = r.url; saveBuild();
+  showPublished(r.url);
+  if (state.me && !r.updated) { state.me.usage.sites++; renderUsage(); }
+  sitesLoaded = false;
+  return r.url;
+}
+
+$("#build-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (build.abort) { build.abort.abort(); return; }
+  const req = $("#build-prompt").value.trim(); if (!req) return;
+  const engine = $("#build-engine").value || "gw:auto";
   const btn = $("#btn-build"); btn.textContent = "■ إيقاف"; btn.classList.add("danger");
   build.abort = new AbortController();
-  let full = "", label = "", rounds = 0;
   const status = $("#build-status");
   try {
-    let messages = base;
-    for (;;) {
-      rounds++;
-      const r = await llmStream(messages, engine, {
-        maxTokens: Math.min(budget, 32000), signal: build.abort.signal, temperature: 0.4,
-        onDelta: (t, _p, thinking) => {
-          status.textContent = thinking && !t ? "🤔 يخطط للمشروع…" : `✍ يكتب الكود… ${(full.length + t.length).toLocaleString("en-US")} حرف${rounds > 1 ? ` (جزء ${rounds})` : ""}`;
-        },
-      });
-      full += r.text; label = r.label;
-      // إكمال تلقائي إذا انقطع الكود بسبب حد التوكنات
-      const unfinished = r.finish === "length" || (!/<\/html>\s*(```)?\s*$/i.test(full.trim()) && /<html|<!doctype/i.test(full));
-      if (!unfinished || rounds >= 6 || full.length > budget * 4) break;
-      status.textContent = `↻ الكود طويل — أكمل الجزء ${rounds + 1}…`;
-      messages = [...base, { role: "assistant", content: full },
-        { role: "user", content: "Continue EXACTLY from where you stopped. Do not repeat anything and do not restart the code block — output only the remaining code." }];
-    }
-    let html = extractHtml(full);
-    if (!/<html|<body|<div/i.test(html)) throw new Error("النموذج لم يرجع HTML صالحًا — جرّب محركًا آخر");
-    if (!/<\/html>/i.test(html)) html += "\n</body></html>";
-    build.versions = build.versions.slice(0, build.idx + 1);
-    build.versions.push({ req, code: html, t: Date.now() });
-    build.idx = build.versions.length - 1;
-    saveBuild(); setPreview();
+    const r = await generateSite(req, $("#build-kind").value, { engine, budget: +$("#build-size").value, signal: build.abort.signal,
+      onStatus: (t) => { status.textContent = t; } });
     $("#build-prompt").value = "";
-    status.textContent = `✓ ${label}${rounds > 1 ? ` · ${rounds} أجزاء` : ""}`;
+    status.textContent = `✓ ${r.label}${r.rounds > 1 ? ` · ${r.rounds} أجزاء` : ""}`;
   } catch (err) {
     status.innerHTML = err.name === "AbortError" ? "أُوقف البناء." : `<span class="b-red">${esc(err.message)}</span>`;
   }
@@ -889,24 +959,16 @@ $("#btn-reset").addEventListener("click", () => {
 
 // ------------------------------------------------------------------ النشر برابط حقيقي
 function showPublished(url) {
+  build.url = url; setPreview();
   $("#publish-box").hidden = false;
   $("#publish-url").value = url;
   $("#publish-open").href = url;
   $("#publish-qr").src = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=" + encodeURIComponent(url);
 }
 $("#btn-publish").addEventListener("click", async () => {
-  const code = currentCode(); if (!code) return;
   const btn = $("#btn-publish"); btn.disabled = true; btn.textContent = "⏳ جارٍ النشر…";
-  try {
-    const v = build.versions[build.idx];
-    const title = (code.match(/<title>([^<]{1,120})<\/title>/i)?.[1] || build.versions[0]?.req || "مشروعي").trim().slice(0, 120);
-    const r = await api("/api/sites", { method: "POST", body: { html: code, title, kind: $("#build-kind").value, prompt: v?.req, slug: build.slug || undefined } });
-    build.slug = r.slug; saveBuild();
-    showPublished(r.url);
-    toast(r.updated ? "تم تحديث الموقع المنشور ✓" : "تم النشر ✓ الرابط جاهز");
-    if (state.me && !r.updated) { state.me.usage.sites++; renderUsage(); }
-    loadMySites(true);
-  } catch (e) { toast(e.message, true); }
+  try { const had = !!build.slug; await publishCurrent(); toast(had ? "تم تحديث الموقع المنشور ✓" : "تم النشر ✓ الرابط جاهز"); loadMySites(true); }
+  catch (e) { toast(e.message, true); }
   btn.disabled = false; btn.textContent = "🚀 انشر واحصل على رابط";
 });
 $("#publish-copy").addEventListener("click", async () => {
@@ -916,7 +978,7 @@ $("#publish-share").addEventListener("click", async () => {
   const url = $("#publish-url").value;
   try { if (navigator.share) await navigator.share({ title: "موقعي", url }); else { await navigator.clipboard.writeText(url); toast("تم نسخ الرابط"); } } catch { }
 });
-let sitesLoaded = false;
+var sitesLoaded = false;
 async function loadMySites(force = false) {
   if (sitesLoaded && !force) return;
   try {
@@ -1084,7 +1146,7 @@ $("#btn-save").addEventListener("click", async () => {
   renderAccount();
   if (chats.length) { currentChat = chats[chats.length - 1]; renderChatList(); renderChat(); } else newChat();
   if (build.slug && currentCode()) loadMySites();
-  showTab(store.get("tab", "chat") || "chat");
+  showTab("chat");
   await checkEngine();
   refreshAll();
 })();
@@ -1094,3 +1156,47 @@ setInterval(() => {
 }, 8000);
 window.addEventListener("resize", () => drawLoss(state.lastMetrics || []));
 $("#btn-refresh-prov").addEventListener("click", refreshMe);
+
+// ------------------------------------------------------------------ الاستوديو: كل شي من الدردشة
+function openPreview() { document.body.classList.add("preview-open"); }
+function closePreview() { document.body.classList.remove("preview-open"); }
+function openClassic(tab) { document.body.classList.add("classic"); closeMenu(); showTab(tab); }
+function closeClassic() { document.body.classList.remove("classic"); showTab("chat"); }
+function openMenu() { renderChatList(); $("#side-menu").hidden = false; }
+function closeMenu() { $("#side-menu").hidden = true; }
+$("#btn-menu").addEventListener("click", openMenu);
+$("#btn-menu-close").addEventListener("click", closeMenu);
+$("#side-menu").addEventListener("click", (e) => {
+  if (e.target.id === "side-menu") return closeMenu();
+  const c = e.target.closest("[data-chat]");
+  if (c) { currentChat = chats.find((x) => x.id === c.dataset.chat); renderChatList(); renderChat(); closeMenu(); closeClassic(); return; }
+  const m = e.target.closest("[data-menu]"); if (!m) return;
+  if (m.dataset.menu === "new") { closeMenu(); freshStart(); return; }
+  openClassic(m.dataset.menu);
+});
+$("#btn-back-chat").addEventListener("click", closeClassic);
+function freshStart() {
+  // محادثة جديدة = مشروع جديد (المواقع المنشورة تبقى بقسم «مواقعي»)
+  build.versions = []; build.idx = -1; build.slug = null; build.url = null; saveBuild(); setPreview(); closePreview();
+  closeClassic(); newChat(); $("#chat-text").focus();
+}
+$("#btn-new-top").addEventListener("click", freshStart);
+$("#sp-close").addEventListener("click", closePreview);
+$("#sp-undo").addEventListener("click", () => { if (build.idx > 0) { build.idx--; saveBuild(); setPreview(); } });
+$("#sp-redo").addEventListener("click", () => { if (build.idx < build.versions.length - 1) { build.idx++; saveBuild(); setPreview(); } });
+$("#sp-publish").addEventListener("click", async () => {
+  const b = $("#sp-publish"); b.disabled = true; b.textContent = "⏳…";
+  try { const had = !!build.slug; const url = await publishCurrent(); toast(had ? "تم تحديث الموقع ✓" : "تم النشر ✓"); try { await navigator.clipboard.writeText(url); } catch { } }
+  catch (e) { toast(e.message, true); }
+  b.disabled = false; b.textContent = "🚀 نشر";
+});
+$("#sp-copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(build.url); toast("تم نسخ الرابط"); } catch { } });
+$$("#sp-device button").forEach((b) => b.addEventListener("click", () => {
+  $$("#sp-device button").forEach((x) => x.classList.toggle("active", x === b));
+  $("#preview").style.maxWidth = b.dataset.w;
+}));
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-open-preview]")) openPreview();
+  const q = e.target.closest(".hero-chips [data-q]");
+  if (q) { $("#chat-text").value = q.dataset.q; $("#chat-form").requestSubmit(); }
+});
