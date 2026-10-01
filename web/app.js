@@ -620,9 +620,21 @@ function detectIntent(text, hasProject = false) {
 }
 
 // يكتب النص العربي الصحيح فوق مكانه بالصورة (الخط والتشكيل العربي من المتصفح نفسه، فيطلع صحيح 100%)
+let overlayFont;
+function loadOverlayFont() {
+  return overlayFont ||= (async () => {
+    try {
+      const f = new FontFace("MajArabic", 'url("/fonts/maj-arabic.woff2") format("woff2")', { weight: "100 900" });
+      await f.load(); document.fonts.add(f);
+      return '"MajArabic"';
+    } catch { return '"Noto Naskh Arabic", Tahoma, sans-serif'; }
+  })();
+}
 async function applyOverlays(url, overlays) {
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-  try { await document.fonts.load('800 64px "Cairo"', "ابت"); } catch { }
+  // خط عربي كامل بملف واحد من موقعنا: خط Google مقسّم لملفات، وبعض متصفحات الجوال
+  // تخلط بين الملفات على الـcanvas فتطلع «بي» كأنها bi
+  const family = await loadOverlayFont();
   const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
   const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
   for (const o of overlays) {
@@ -632,7 +644,7 @@ async function applyOverlays(url, overlays) {
     ctx.fillStyle = o.bg; ctx.beginPath();
     (ctx.roundRect ? ctx.roundRect(x, y, w, h, Math.min(h * 0.18, 18)) : ctx.rect(x, y, w, h)); ctx.fill();
     let size = h * 0.62;
-    const font = (sz) => `800 ${sz}px Cairo, "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif`;
+    const font = (sz) => `bold ${sz}px ${family}`;
     ctx.font = font(size);
     while (ctx.measureText(o.text).width > w * 0.9 && size > 8) { size -= 1; ctx.font = font(size); }
     ctx.fillStyle = o.fg; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
