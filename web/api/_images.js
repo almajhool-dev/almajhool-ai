@@ -59,6 +59,8 @@ export async function fallbackImage(prompt, gatewayError) {
 // نماذج الصور لا تفهم العربية: نحوّل الوصف إلى برومبت إنجليزي قبل التوليد.
 // 1) نموذج لغوي عبر البوابة (يفهم اللهجات ويحسّن الوصف) — 2) ترجمة Google المجانية بدون مفتاح — 3) الوصف كما هو
 export const hasArabic = (s) => /[؀-ۿ]/.test(String(s || ""));
+// العربي المسموح بالوصف هو النص المطلوب كتابته داخل الصورة فقط (بين علامتي تنصيص)
+const arabicOutsideQuotes = (s) => hasArabic(String(s || "").replace(/["“”«»][^"“”«»]*["“”«»]/g, ""));
 
 const IMG_SYSTEM = `You are an expert prompt engineer for state-of-the-art text-to-image models.
 Turn the user's request (Arabic in any dialect incl. Iraqi slang and typos, or English) into ONE rich English prompt of 80-140 words.
@@ -66,7 +68,9 @@ Rules:
 - Keep EVERY detail the user asked for (subject, count, colors, clothing, pose, place, style, mood). Never drop or contradict any of them; never add unrelated subjects.
 - Start with the main subject and what it is doing, then: specific visual attributes and materials, setting/background, composition and camera (shot type, angle, lens), lighting, color palette, art style or medium, and quality cues (highly detailed, sharp focus, intricate textures).
 - If no style is given, choose the one that best fits the request (e.g. photorealistic for real things, clean vector for logos).
-- Logos/icons: centered, clean background, simple bold shapes. Text inside the image only if asked; put it in double quotes exactly as written.
+- Logos/icons: centered, clean background, simple bold shapes.
+- Text inside the image only if asked: put it in double quotes exactly as written (keep Arabic as Arabic), say where it appears (e.g. an embroidered patch on the chest), and keep it short.
+- Flags, uniforms, emblems and landmarks: describe their real colors, layout and symbols precisely in words (exact stripes, colors and emblem of the named flag), so the image model draws them correctly.
 - Output only the prompt, no preface.`;
 
 export async function googleTranslate(text) {
@@ -86,7 +90,7 @@ export async function toEnglishPrompt(prompt, chatFn) {
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 20_000));
       const t = String(await Promise.race([chatFn([{ role: "system", content: IMG_SYSTEM }, { role: "user", content: prompt }]), timeout]) || "")
         .trim().replace(/^["'`]+|["'`]+$/g, "");
-      if (t && !hasArabic(t) && t.length > 10) return t;
+      if (t && !arabicOutsideQuotes(t) && t.length > 10) return t;
     } catch { /* ننتقل للترجمة */ }
   }
   if (!hasArabic(prompt)) return prompt;
