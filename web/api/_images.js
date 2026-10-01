@@ -2,6 +2,9 @@
 // ملف يبدأ بـ _ فلا يصبح مسارًا في Vercel
 // مساحات Hugging Face العامة (Gradio) — تعمل بدون مفتاح (وبحصة أكبر إذا وُجد HF_TOKEN)
 const SPACES = [
+  // Z-Image Turbo: جودة عالية والتزام قوي بالوصف (أدق من FLUX schnell)
+  { id: "z-image-turbo", base: "https://mrfakename-z-image-turbo.hf.space", api: "generate_image",
+    data: (p, seed) => [p, 1024, 1024, 9, seed, false] },
   { id: "flux-schnell", base: "https://black-forest-labs-flux-1-schnell.hf.space", api: "infer",
     data: (p, seed) => [p, seed, false, 1024, 1024, 4] },
   { id: "sd3.5-turbo", base: "https://stabilityai-stable-diffusion-3-5-large-turbo.hf.space", api: "infer",
@@ -15,9 +18,10 @@ async function runSpace(sp, prompt, seed) {
     method: "POST", headers, body: JSON.stringify({ data: sp.data(prompt, seed) }), signal: AbortSignal.timeout(15_000) });
   const { event_id } = await start.json().catch(() => ({}));
   if (!start.ok || !event_id) throw new Error(`HTTP ${start.status}`);
-  const res = await fetch(`${sp.base}/gradio_api/call/${sp.api}/${event_id}`, { headers, signal: AbortSignal.timeout(45_000) });
+  const res = await fetch(`${sp.base}/gradio_api/call/${sp.api}/${event_id}`, { headers, signal: AbortSignal.timeout(60_000) });
   const text = await res.text();
-  const m = text.match(/event:\s*complete\s*\ndata:\s*(.+)/);
+  const all = [...text.matchAll(/event:\s*complete\s*\ndata:\s*(.+)/g)];
+  const m = all[all.length - 1];
   if (!m) throw new Error((text.match(/event:\s*error\s*\ndata:\s*(.+)/)?.[1] || "no result").slice(0, 120));
   const out = JSON.parse(m[1])[0];
   const url = out?.url || (out?.path && `${sp.base}/gradio_api/file=${out.path}`);

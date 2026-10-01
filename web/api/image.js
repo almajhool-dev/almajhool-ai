@@ -42,7 +42,8 @@ export const POST = route(async (request) => {
   await sql`INSERT INTO images (id, user_id, prompt, model, mime, data, width, height)
             VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${data.model || model}, ${mime}, ${bytes}, ${w}, ${h})`;
   await logUsage(user.id, "image", 0, data.provider || "workers-ai", data.model || model);
-  return json({ id, url: `/i/${id}`, prompt, width: w, height: h, created_at: new Date().toISOString() });
+  return json({ id, url: `/i/${id}`, prompt, understood: english !== String(prompt) ? english : null,
+    provider: data.provider || null, width: w, height: h, created_at: new Date().toISOString() });
 });
 
 export const GET = route(async (request) => {
