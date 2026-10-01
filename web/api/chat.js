@@ -1,5 +1,6 @@
 // الدردشة: يتحقق من الجلسة والحصة، يمرر للبوابة، ويبث الرد (SSE) ويسجّل التوكنات المستهلكة
 import { HttpError, estTokens, gateway, logUsage, requireUser, route, usageToday } from "./_lib.js";
+import { DIRECT, directChat, directConfigured } from "./_direct.js";
 
 
 export const POST = route(async (request) => {
@@ -12,16 +13,26 @@ export const POST = route(async (request) => {
     throw new HttpError(429, `وصلت حدك اليومي (${user.daily_tokens.toLocaleString("en-US")} توكن). يتجدد غدًا.`);
   }
   const promptTokens = estTokens(messages.map((m) => m?.content).join(""));
-  const upstream = await gateway("/api/chat", {
-    messages, provider: body.provider || "auto", temperature: body.temperature,
-    max_tokens: Math.min(Number(body.max_tokens) || 4096, 32000), stream: true,
-  });
-  if (!upstream.ok) {
-    const e = await upstream.json().catch(() => ({}));
-    throw new HttpError(502, e.error || "البوابة لم ترد");
+  const want = body.provider || "auto";
+  const req = { messages, provider: want, temperature: body.temperature,
+    max_tokens: Math.min(Number(body.max_tokens) || 4096, 32000), stream: true };
+  // 1) النماذج المتصلة مباشرة بالموقع (مثل Gemini) — أولًا في الوضع التلقائي أو عند اختيارها
+  let upstream = null, provider = null, model = null, directError = null;
+  const isDirect = DIRECT.some((p) => p.id === want);
+  if ((want === "auto" || isDirect) && directConfigured().length) {
+    try { ({ res: upstream, provider, model } = await directChat(req)); }
+    catch (e) { directError = e.message; }
   }
-  const provider = upstream.headers.get("x-provider");
-  const model = upstream.headers.get("x-model");
+  // 2) البوابة (كل المصادر المجانية الأخرى) — أو احتياط إذا فشل المباشر
+  if (!upstream) {
+    upstream = await gateway("/api/chat", { ...req, provider: isDirect ? "auto" : want });
+    if (!upstream.ok) {
+      const e = await upstream.json().catch(() => ({}));
+      throw new HttpError(502, e.error || directError || "البوابة لم ترد");
+    }
+    provider = upstream.headers.get("x-provider");
+    model = upstream.headers.get("x-model");
+  }
   const headers = { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform",
     "X-Provider": provider || "", "X-Model": model || "" };
 
