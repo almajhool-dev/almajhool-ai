@@ -252,9 +252,11 @@ export async function locateTexts(imageDataUrl, texts, request, visionFn) {
   if (!texts.length || !visionFn) return [];
   const prompt = `This image was generated for the request: "${request}".
 The image should show this exact Arabic text: ${texts.map((t) => `"${t}"`).join(", ")}.
-Image models usually render the letters wrong. For each text, find the region where it is written (even if garbled or in English). If it is missing, choose the most natural flat surface where it should appear according to the request (e.g. a chest patch, sign or banner).
-Return ONLY JSON: [{"text": "<exact text>", "box_2d": [ymin, xmin, ymax, xmax], "bg": "#rrggbb", "fg": "#rrggbb"}]
-box_2d is normalized 0-1000 and must tightly cover the existing lettering area (patch/label), bg is that area's background color, fg is a readable text color matching the design.`;
+Image models usually render the letters wrong. The text will be PRINTED directly onto the surface (like screen-printed letters on a uniform, or painted on a sign) with no sticker or label box.
+For each text, find where it is written (even if garbled or in English). If it is missing, choose the most natural place for it according to the request: for clothing, a flat area of the chest or back panel, wide enough for the whole text; for signs, the sign face.
+Return ONLY JSON: [{"text": "<exact text>", "box_2d": [ymin, xmin, ymax, xmax], "bg": "#rrggbb", "fg": "#rrggbb", "angle": 0, "existing": true}]
+box_2d is normalized 0-1000: it must cover any existing lettering completely and be wide enough for the text to be clearly legible (letters about as tall as the box). It must stay on that flat surface and must not cover faces, hands, zippers, pockets edges or reflective stripes.
+bg is the surface color there, fg is the print/ink color a real uniform or sign would use (strong contrast, e.g. white or reflective silver on dark fabric, black on light), angle is the surface tilt in degrees (-25..25, positive = clockwise), existing is true only if some (wrong or garbled) lettering is already drawn inside the box.`;
   const answer = String(await visionFn([{ role: "user", content: [
     { type: "text", text: prompt },
     { type: "image_url", image_url: { url: imageDataUrl } },
@@ -268,6 +270,7 @@ box_2d is normalized 0-1000 and must tightly cover the existing lettering area (
     const [y0, x0, y1, x1] = b.map((v) => Math.max(0, Math.min(1000, v)));
     if (y1 - y0 < 15 || x1 - x0 < 30) return null;
     const text = texts.includes(o.text) ? o.text : texts[0];
-    return { text, box: [y0, x0, y1, x1], bg: hex(o.bg, "#111111"), fg: hex(o.fg, "#ffffff") };
+    const angle = Math.max(-25, Math.min(25, Number(o.angle) || 0));
+    return { text, box: [y0, x0, y1, x1], bg: hex(o.bg, "#111111"), fg: hex(o.fg, "#ffffff"), angle, existing: o.existing !== false };
   }).filter(Boolean).slice(0, 3);
 }

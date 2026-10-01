@@ -637,18 +637,49 @@ async function applyOverlays(url, overlays) {
   const family = await loadOverlayFont();
   const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
   const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+  const canvas = (w, h) => { const k = document.createElement("canvas"); k.width = Math.max(1, Math.round(w)); k.height = Math.max(1, Math.round(h)); return k; };
   for (const o of overlays) {
     const [y0, x0, y1, x1] = o.box;
-    let x = (x0 / 1000) * c.width, y = (y0 / 1000) * c.height, w = ((x1 - x0) / 1000) * c.width, h = ((y1 - y0) / 1000) * c.height;
-    const pad = Math.max(4, h * 0.12); x -= pad; y -= pad; w += pad * 2; h += pad * 2;
-    ctx.fillStyle = o.bg; ctx.beginPath();
-    (ctx.roundRect ? ctx.roundRect(x, y, w, h, Math.min(h * 0.18, 18)) : ctx.rect(x, y, w, h)); ctx.fill();
-    let size = h * 0.62;
+    const x = (x0 / 1000) * c.width, y = (y0 / 1000) * c.height, w = ((x1 - x0) / 1000) * c.width, h = ((y1 - y0) / 1000) * c.height;
+    const pad = Math.max(6, h * 0.3);
+    const rx = Math.max(0, Math.floor(x - pad)), ry = Math.max(0, Math.floor(y - pad));
+    const rw = Math.min(c.width - rx, Math.ceil(w + pad * 2)), rh = Math.min(c.height - ry, Math.ceil(h + pad * 2));
+    if (rw < 4 || rh < 4) continue;
+
+    const orig = canvas(rw, rh); orig.getContext("2d").drawImage(c, rx, ry, rw, rh, 0, 0, rw, rh);
+    // ١) إذا الرسام كتب حروف غلط نمسحها: نملي مكانها بلون القماش من فوگ وجوه (بدون ما ناخذ الحروف نفسها)، بدون مربع أو ملصق
+    const patch = canvas(rw, rh), pctx = patch.getContext("2d");
+    if (o.existing !== false) {
+      const top = Math.max(2, Math.floor(y - ry)), bottom = Math.max(2, Math.floor(ry + rh - (y + h)));
+      const cols = Math.max(2, Math.round(rw / Math.max(3, h * 0.5)));
+      const small = canvas(cols, 2), sctx = small.getContext("2d"); sctx.imageSmoothingQuality = "high";
+      sctx.drawImage(c, rx, ry, rw, Math.min(top, rh), 0, 0, cols, 1);
+      sctx.drawImage(c, rx, ry + rh - Math.min(bottom, rh), rw, Math.min(bottom, rh), 0, 1, cols, 1);
+      pctx.imageSmoothingQuality = "high"; pctx.drawImage(small, 0, 0, rw, rh);
+      // حبيبات خفيفة حتى يشبه نسيج القماش مو لون مسطح
+      const px = pctx.getImageData(0, 0, rw, rh);
+      for (let i = 0; i < px.data.length; i += 4) { const n = (Math.random() - 0.5) * 10; px.data[i] += n; px.data[i + 1] += n; px.data[i + 2] += n; }
+      pctx.putImageData(px, 0, 0);
+      const f = Math.max(3, pad * 0.8), mask = canvas(rw, rh), mctx = mask.getContext("2d");
+      mctx.shadowColor = "#000"; mctx.shadowBlur = f; mctx.shadowOffsetX = rw + 50;
+      mctx.fillRect(f - rw - 50, f, rw - f * 2, rh - f * 2);
+      pctx.globalCompositeOperation = "destination-in"; pctx.drawImage(mask, 0, 0);
+      ctx.drawImage(patch, rx, ry);
+    }
+
+    // ٢) نطبع النص نفسه على السطح: بلون الحبر، مايل وية السطح، وياخذ ظلال وطيّات القماش من الصورة الأصلية
+    const t = canvas(rw, rh), tctx = t.getContext("2d");
+    let size = h * 0.82;
     const font = (sz) => `bold ${sz}px ${family}`;
-    ctx.font = font(size);
-    while (ctx.measureText(o.text).width > w * 0.9 && size > 8) { size -= 1; ctx.font = font(size); }
-    ctx.fillStyle = o.fg; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
-    ctx.fillText(o.text, x + w / 2, y + h / 2 + size * 0.05);
+    tctx.font = font(size);
+    while (tctx.measureText(o.text).width > w * 0.94 && size > 8) { size -= 1; tctx.font = font(size); }
+    tctx.translate(rw / 2, rh / 2); tctx.rotate(((o.angle || 0) * Math.PI) / 180);
+    tctx.fillStyle = o.fg; tctx.textAlign = "center"; tctx.textBaseline = "middle"; tctx.direction = "rtl";
+    tctx.fillText(o.text, 0, size * 0.05);
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    tctx.globalCompositeOperation = "source-atop"; tctx.globalAlpha = 0.22;
+    tctx.drawImage(orig, 0, 0);
+    ctx.globalAlpha = 0.95; ctx.drawImage(t, rx, ry); ctx.globalAlpha = 1;
   }
   return c.toDataURL("image/png");
 }
