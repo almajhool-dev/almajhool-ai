@@ -43,15 +43,37 @@ jobs:
       - name: Sync AI provider keys to the gateway
         if: steps.check.outputs.ok == 'true'
         working-directory: gateway
+        # كل مفتاح باسمه (GitHub يوقف أي workflow يمرر كل الأسرار دفعة وحدة)
         env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SCALEWAY_API_KEY: ${{ secrets.SCALEWAY_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
+          HYPERBOLIC_API_KEY: ${{ secrets.HYPERBOLIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+          LLM7_API_KEY: ${{ secrets.LLM7_API_KEY }}
+          OVH_API_KEY: ${{ secrets.OVH_API_KEY }}
+          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+          EXTRA_PROVIDERS: ${{ secrets.EXTRA_PROVIDERS }}
         run: |
-          NAMES="CEREBRAS_API_KEY GROQ_API_KEY GEMINI_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY
-                 GITHUB_MODELS_TOKEN SAMBANOVA_API_KEY COHERE_API_KEY HF_TOKEN SCALEWAY_API_KEY AI_GATEWAY_API_KEY
-                 NEBIUS_API_KEY HYPERBOLIC_API_KEY TOGETHER_API_KEY KILO_API_KEY LLM7_API_KEY OVH_API_KEY POLLINATIONS_API_KEY
-                 EXTRA_PROVIDERS"
-          FILTER=$(printf '%s\n' $NAMES | jq -R . | jq -s .)
-          echo "$ALL_SECRETS" | jq --argjson n "$FILTER" 'with_entries(select(.key as $k | $n | index($k)) | select(.value != ""))' > "$RUNNER_TEMP/keys.json"
+          echo '{}' > "$RUNNER_TEMP/keys.json"
+          for K in CEREBRAS_API_KEY GROQ_API_KEY GEMINI_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY OPENROUTER_API_KEY GITHUB_MODELS_TOKEN SAMBANOVA_API_KEY COHERE_API_KEY HF_TOKEN SCALEWAY_API_KEY AI_GATEWAY_API_KEY NEBIUS_API_KEY HYPERBOLIC_API_KEY TOGETHER_API_KEY KILO_API_KEY LLM7_API_KEY OVH_API_KEY POLLINATIONS_API_KEY EXTRA_PROVIDERS; do
+            V="${!K}"
+            if [ -n "$V" ]; then
+              jq --arg k "$K" --arg v "$V" '. + {($k): $v}' "$RUNNER_TEMP/keys.json" > "$RUNNER_TEMP/k.tmp" && mv "$RUNNER_TEMP/k.tmp" "$RUNNER_TEMP/keys.json"
+            fi
+          done
           echo "Keys found in GitHub secrets: $(jq -r 'keys | join(", ")' "$RUNNER_TEMP/keys.json")"
           if [ "$(jq 'length' "$RUNNER_TEMP/keys.json")" -gt 0 ]; then
             npx --yes wrangler@4 secret bulk "$RUNNER_TEMP/keys.json"
