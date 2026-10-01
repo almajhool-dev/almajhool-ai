@@ -83,3 +83,48 @@ export async function toEnglishPrompt(prompt, chatFn) {
   } catch { /* نكمل بالوصف الأصلي */ }
   return prompt;
 }
+
+// ------------------------------------------------------------------ رسم مباشر بـ Gemini (يفهم الطلب ويرسمه بنفسه — أدق بكثير من FLUX)
+const GEMINI_IMAGE_MODELS = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-2.0-flash-preview-image-generation"];
+const gemImgCooldown = new Map();
+
+/** يرجع {image, model} أو يرمي خطأ. prompt يمكن أن يكون بالعربي مباشرة */
+export async function geminiImage(prompt, apiKey = process.env.GEMINI_API_KEY) {
+  const keys = String(apiKey || "").split(/[\s,]+/).filter(Boolean);
+  if (!keys.length) throw new Error("no GEMINI_API_KEY");
+  const custom = String(process.env.GEMINI_IMAGE_MODELS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const errors = [];
+  for (const model of custom.length ? custom : GEMINI_IMAGE_MODELS) {
+    for (const [ki, key] of keys.entries()) {
+      const ck = `${ki}|${model}`;
+      if ((gemImgCooldown.get(ck) || 0) > Date.now()) continue;
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST",
+          headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: `Generate one high-quality image that follows this request exactly (the request may be in Arabic or Iraqi dialect; any text that must appear in the image should be written exactly as requested): ${prompt}` }] }],
+            generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = data?.error?.message || `HTTP ${res.status}`;
+          // حصة مجانية صفر/منتهية أو نموذج غير موجود: نوقفه فترة طويلة حتى ما نضيع وقت كل طلب
+          gemImgCooldown.set(ck, Date.now() + (res.status === 429 || res.status === 404 || res.status === 400 ? 3 * 3600_000 : 60_000));
+          errors.push(`${model}: ${msg.slice(0, 160)}`);
+          continue;
+        }
+        const part = (data?.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data || p.inline_data?.data);
+        const inline = part?.inlineData || part?.inline_data;
+        if (!inline) { errors.push(`${model}: no image in response`); continue; }
+        return { image: `data:${inline.mimeType || inline.mime_type || "image/png"};base64,${inline.data}`, model, provider: "gemini" };
+      } catch (e) {
+        gemImgCooldown.set(ck, Date.now() + 60_000);
+        errors.push(`${model}: ${String(e.message).slice(0, 120)}`);
+      }
+    }
+  }
+  throw new Error(errors.join(" | "));
+}

@@ -44,3 +44,14 @@ jobs:
               const en = await toEnglishPrompt('صمملي شعار لقناة يوتيوب عن الأمن السيبراني', (m) => directText(m, { max_tokens: 300 }));
               console.log('GEMINI_PROMPT', en.slice(0, 200));
             } catch (e) { console.log('GEMINI_FAIL', e.message.slice(0, 400)); process.exitCode = 1; }"
+      - name: Gemini draws the image itself (real key)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY not set — skipping"; exit 0; fi
+          node --input-type=module -e "
+            import { geminiImage } from './web/api/_images.js';
+            const t = Date.now();
+            try { const r = await geminiImage('ارسملي أسد لابس تاج ذهبي بستايل واقعي، وجنبه مكتوب \"المجهول\"');
+                  console.log('GEMINI_IMAGE_OK', r.model, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
+            catch (e) { console.log('GEMINI_IMAGE_FAIL', e.message.slice(0, 600)); }"
