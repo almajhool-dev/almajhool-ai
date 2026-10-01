@@ -33,7 +33,7 @@
       "maxDuration": 300
     },
     "api/image.js": {
-      "maxDuration": 120
+      "maxDuration": 300
     }
   }
 }
