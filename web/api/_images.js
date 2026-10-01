@@ -252,11 +252,13 @@ export async function locateTexts(imageDataUrl, texts, request, visionFn) {
   if (!texts.length || !visionFn) return [];
   const prompt = `This image was generated for the request: "${request}".
 The image should show this exact Arabic text: ${texts.map((t) => `"${t}"`).join(", ")}.
-Image models usually render the letters wrong. The text will be PRINTED directly onto the surface (like screen-printed letters on a uniform, or painted on a sign) with no sticker or label box.
-For each text, find where it is written (even if garbled or in English). If it is missing, choose the most natural place for it according to the request: for clothing, a flat area of the chest or back panel, wide enough for the whole text; for signs, the sign face.
-Return ONLY JSON: [{"text": "<exact text>", "box_2d": [ymin, xmin, ymax, xmax], "bg": "#rrggbb", "fg": "#rrggbb", "angle": 0, "existing": true}]
-box_2d is normalized 0-1000: it must cover any existing lettering completely and be wide enough for the text to be clearly legible (letters about as tall as the box). It must stay on that flat surface and must not cover faces, hands, zippers, pockets edges or reflective stripes.
-bg is the surface color there, fg is the print/ink color a real uniform or sign would use (strong contrast, e.g. white or reflective silver on dark fabric, black on light), angle is the surface tilt in degrees (-25..25, positive = clockwise), existing is true only if some (wrong or garbled) lettering is already drawn inside the box.`;
+Image models usually render the letters wrong, so the correct text will be redrawn on top. Choose a style for each text:
+- "patch": on clothing/uniforms. A sewn-on embroidered name tape like real military, police and firefighter uniforms: a small dark rectangle on the chest just ABOVE the chest pocket (right or left side), about as wide as the pocket and about 4-5 times wider than tall, with white embroidered letters.
+- "print": on signs, walls, vehicles, banners, screens and other surfaces: letters painted/printed directly on the surface.
+For each text, find where it is written (even if garbled or in English). If it is missing, choose the most natural place for it according to the request.
+Return ONLY JSON: [{"text": "<exact text>", "style": "patch", "box_2d": [ymin, xmin, ymax, xmax], "bg": "#rrggbb", "fg": "#rrggbb", "angle": 0, "existing": true}]
+box_2d is normalized 0-1000: for "patch" it is the name tape itself (cover any existing lettering/tape there completely); for "print" it must cover any existing lettering and be wide enough for the text to be clearly legible. It must not cover faces, hands or zippers.
+bg is the patch color (for "patch": a dark color close to the uniform, e.g. the uniform color slightly darker) or the surface color (for "print"); fg is the thread/ink color (strong contrast: white or light grey on dark, black on light); angle is the surface tilt in degrees (-25..25, positive = clockwise); existing is true only if some (wrong or garbled) lettering is already drawn inside the box.`;
   const answer = String(await visionFn([{ role: "user", content: [
     { type: "text", text: prompt },
     { type: "image_url", image_url: { url: imageDataUrl } },
@@ -268,9 +270,9 @@ bg is the surface color there, fg is the print/ink color a real uniform or sign 
     const b = (o.box_2d || o.box || []).map(Number);
     if (b.length !== 4 || b.some((v) => !Number.isFinite(v))) return null;
     const [y0, x0, y1, x1] = b.map((v) => Math.max(0, Math.min(1000, v)));
-    if (y1 - y0 < 15 || x1 - x0 < 30) return null;
+    if (y1 - y0 < 6 || x1 - x0 < 20) return null;
     const text = texts.includes(o.text) ? o.text : texts[0];
     const angle = Math.max(-25, Math.min(25, Number(o.angle) || 0));
-    return { text, box: [y0, x0, y1, x1], bg: hex(o.bg, "#111111"), fg: hex(o.fg, "#ffffff"), angle, existing: o.existing !== false };
+    return { text, box: [y0, x0, y1, x1], bg: hex(o.bg, "#111111"), fg: hex(o.fg, "#ffffff"), angle, existing: o.existing !== false, style: o.style === "print" ? "print" : "patch" };
   }).filter(Boolean).slice(0, 3);
 }

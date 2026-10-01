@@ -630,6 +630,45 @@ function loadOverlayFont() {
     } catch { return '"Noto Naskh Arabic", Tahoma, sans-serif'; }
   })();
 }
+const shade = (hex, p) => {
+  const n = parseInt(String(hex).slice(1), 16) || 0, f = (v) => Math.max(0, Math.min(255, Math.round(v + (p > 0 ? 255 - v : v) * p)));
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+};
+// شريط اسم مخيّط على البدلة (مثل بدلات الشرطة والدفاع المدني والجيش): قماش غامق، خياطة على الحواف، وحروف مطرّزة
+function drawNameTape(ctx, o, x, y, w, h, family) {
+  if (h > w / 3) { const nh = w / 4.2; y += (h - nh) / 2; h = nh; } // نسبة الشريط الحقيقية
+  ctx.save();
+  ctx.translate(x + w / 2, y + h / 2); ctx.rotate(((o.angle || 0) * Math.PI) / 180);
+  const L = -w / 2, T = -h / 2, r = Math.min(h * 0.1, 5);
+  const tape = () => { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(L, T, w, h, r) : ctx.rect(L, T, w, h); };
+  ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = Math.max(2, h * 0.15); ctx.shadowOffsetY = Math.max(1, h * 0.05);
+  const g = ctx.createLinearGradient(0, T, 0, T + h);
+  g.addColorStop(0, shade(o.bg, 0.1)); g.addColorStop(1, shade(o.bg, -0.15));
+  tape(); ctx.fillStyle = g; ctx.fill();
+  ctx.shadowColor = "transparent";
+  // نسيج القماش
+  ctx.save(); tape(); ctx.clip();
+  ctx.strokeStyle = "rgba(255,255,255,.05)"; ctx.lineWidth = 1;
+  for (let yy = T + 1; yy < T + h; yy += Math.max(2, h * 0.06)) { ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(L + w, yy); ctx.stroke(); }
+  ctx.restore();
+  // خياطة الحواف
+  const inset = Math.max(1.5, h * 0.1);
+  ctx.setLineDash([Math.max(2, h * 0.09), Math.max(1.5, h * 0.06)]);
+  ctx.strokeStyle = shade(o.bg, 0.3); ctx.lineWidth = Math.max(0.8, h * 0.035);
+  ctx.strokeRect(L + inset, T + inset, w - inset * 2, h - inset * 2);
+  ctx.setLineDash([]);
+  // الحروف المطرّزة
+  let size = h * 0.6;
+  const font = (sz) => `bold ${sz}px ${family}`;
+  ctx.font = font(size);
+  while (ctx.measureText(o.text).width > w * 0.82 && size > 6) { size -= 0.5; ctx.font = font(size); }
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
+  ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = Math.max(1, size * 0.06); ctx.shadowOffsetY = Math.max(0.5, size * 0.04);
+  const tg = ctx.createLinearGradient(0, -size / 2, 0, size / 2);
+  tg.addColorStop(0, shade(o.fg, 0.15)); tg.addColorStop(1, shade(o.fg, -0.18));
+  ctx.fillStyle = tg; ctx.fillText(o.text, 0, size * 0.06);
+  ctx.restore();
+}
 async function applyOverlays(url, overlays) {
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
   // خط عربي كامل بملف واحد من موقعنا: خط Google مقسّم لملفات، وبعض متصفحات الجوال
@@ -645,6 +684,7 @@ async function applyOverlays(url, overlays) {
     const rx = Math.max(0, Math.floor(x - pad)), ry = Math.max(0, Math.floor(y - pad));
     const rw = Math.min(c.width - rx, Math.ceil(w + pad * 2)), rh = Math.min(c.height - ry, Math.ceil(h + pad * 2));
     if (rw < 4 || rh < 4) continue;
+    if (o.style !== "print") { drawNameTape(ctx, o, x, y, w, h, family); continue; }
 
     const orig = canvas(rw, rh); orig.getContext("2d").drawImage(c, rx, ry, rw, rh, 0, 0, rw, rh);
     // ١) إذا الرسام كتب حروف غلط نمسحها: نملي مكانها بلون القماش من فوگ وجوه (بدون ما ناخذ الحروف نفسها)، بدون مربع أو ملصق
