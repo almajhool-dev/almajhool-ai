@@ -55,3 +55,18 @@ jobs:
             try { const r = await geminiImage('ارسملي أسد لابس تاج ذهبي بستايل واقعي، وجنبه مكتوب \"المجهول\"');
                   console.log('GEMINI_IMAGE_OK', r.model, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
             catch (e) { console.log('GEMINI_IMAGE_FAIL', e.message.slice(0, 600)); }"
+      - name: Full path — Gemini prompt + best-of-3 + Gemini judge (real key)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY not set — skipping"; exit 0; fi
+          node --input-type=module -e "
+            import { toEnglishPrompt, bestImage } from './web/api/_images.js';
+            import { directText } from './web/api/_direct.js';
+            const req = 'ارسملي أسد لابس تاج ذهبي، بستايل واقعي، خلفية صحراء وقت الغروب';
+            const t0 = Date.now();
+            const en = await toEnglishPrompt(req, (m) => directText(m, { max_tokens: 600, temperature: 0.5 }));
+            console.log('PROMPT', ((Date.now() - t0) / 1000).toFixed(1) + 's', en);
+            const t1 = Date.now();
+            const r = await bestImage(en, req, (m) => directText(m, { max_tokens: 50 }));
+            console.log('BEST_OK', r.provider, 'candidates=' + r.candidates, 'judged=' + !!r.judged, ((Date.now() - t1) / 1000).toFixed(1) + 's', r.image.length, 'chars');"

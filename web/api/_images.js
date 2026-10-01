@@ -4,7 +4,7 @@
 const SPACES = [
   // Z-Image Turbo: جودة عالية والتزام قوي بالوصف (أدق من FLUX schnell)
   { id: "z-image-turbo", base: "https://mrfakename-z-image-turbo.hf.space", api: "generate_image",
-    data: (p, seed) => [p, 1024, 1024, 9, seed, false] },
+    data: (p, seed) => [p, 1280, 1280, 9, seed, false] },
   { id: "flux-schnell", base: "https://black-forest-labs-flux-1-schnell.hf.space", api: "infer",
     data: (p, seed) => [p, seed, false, 1024, 1024, 4] },
   { id: "sd3.5-turbo", base: "https://stabilityai-stable-diffusion-3-5-large-turbo.hf.space", api: "infer",
@@ -60,7 +60,14 @@ export async function fallbackImage(prompt, gatewayError) {
 // 1) نموذج لغوي عبر البوابة (يفهم اللهجات ويحسّن الوصف) — 2) ترجمة Google المجانية بدون مفتاح — 3) الوصف كما هو
 export const hasArabic = (s) => /[؀-ۿ]/.test(String(s || ""));
 
-const IMG_SYSTEM = "You turn any image request (Arabic in any dialect, including Iraqi slang and typos, or English) into ONE vivid English prompt for a text-to-image model, max 70 words. Understand the user's real intent (e.g. 'صمم صور الامن السيبراني' = cybersecurity themed illustration). Remove words like 'draw me'/'ارسملي'/'سويلي'. Keep any text that must appear inside the image in quotes. Output only the prompt.";
+const IMG_SYSTEM = `You are an expert prompt engineer for state-of-the-art text-to-image models.
+Turn the user's request (Arabic in any dialect incl. Iraqi slang and typos, or English) into ONE rich English prompt of 80-140 words.
+Rules:
+- Keep EVERY detail the user asked for (subject, count, colors, clothing, pose, place, style, mood). Never drop or contradict any of them; never add unrelated subjects.
+- Start with the main subject and what it is doing, then: specific visual attributes and materials, setting/background, composition and camera (shot type, angle, lens), lighting, color palette, art style or medium, and quality cues (highly detailed, sharp focus, intricate textures).
+- If no style is given, choose the one that best fits the request (e.g. photorealistic for real things, clean vector for logos).
+- Logos/icons: centered, clean background, simple bold shapes. Text inside the image only if asked; put it in double quotes exactly as written.
+- Output only the prompt, no preface.`;
 
 export async function googleTranslate(text) {
   const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" + encodeURIComponent(text);
@@ -72,15 +79,17 @@ export async function googleTranslate(text) {
 
 /** chatFn(messages) → نص (اختياري، مثل البوابة) */
 export async function toEnglishPrompt(prompt, chatFn) {
-  if (!hasArabic(prompt)) return prompt;
+  // مع Gemini نحسّن كل طلب (عربي أو إنجليزي)؛ بدونه نترجم العربي فقط
+  if (!chatFn && !hasArabic(prompt)) return prompt;
   if (chatFn) {
     try {
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 20_000));
       const t = String(await Promise.race([chatFn([{ role: "system", content: IMG_SYSTEM }, { role: "user", content: prompt }]), timeout]) || "")
         .trim().replace(/^["'`]+|["'`]+$/g, "");
-      if (t && !hasArabic(t)) return t;
+      if (t && !hasArabic(t) && t.length > 10) return t;
     } catch { /* ننتقل للترجمة */ }
   }
+  if (!hasArabic(prompt)) return prompt;
   try {
     const t = await googleTranslate(prompt);
     if (t) return `${t}, highly detailed, high quality`;
@@ -131,4 +140,40 @@ export async function geminiImage(prompt, apiKey = process.env.GEMINI_API_KEY) {
     }
   }
   throw new Error(errors.join(" | "));
+}
+
+// ------------------------------------------------------------------ أفضل صورة: نرسم نسختين بالتوازي ويختار Gemini الأقرب للطلب
+async function spaceImage(sp, prompt, seed) {
+  const res = await runSpace(sp, prompt, seed);
+  const mime = (res.headers.get("content-type") || "").split(";")[0];
+  if (!res.ok || !mime.startsWith("image/")) throw new Error(`${sp.id}: HTTP ${res.status}`);
+  return { image: `data:${mime};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`, provider: sp.id, model: sp.id };
+}
+
+/** judgeFn(messages) → نص (نموذج يرى الصور، مثل Gemini). يرجع رقم الصورة الأفضل (0-based) */
+async function pickBest(candidates, request, judgeFn) {
+  const content = [{ type: "text", text:
+    `User's image request (may be Arabic/Iraqi dialect): "${request}"\n` +
+    `Compare the ${candidates.length} images below. Which one follows the request most faithfully (every requested subject, detail, color, style and composition) and has the best quality and fewest defects (deformed hands/faces, garbled text, artifacts)? Answer with only the image number.` }];
+  candidates.forEach((c, i) => {
+    content.push({ type: "text", text: `Image ${i + 1}:` });
+    content.push({ type: "image_url", image_url: { url: c.image } });
+  });
+  const answer = String(await judgeFn([{ role: "user", content }]) || "");
+  const n = parseInt((answer.match(/\d+/) || [])[0], 10);
+  return n >= 1 && n <= candidates.length ? n - 1 : 0;
+}
+
+export async function bestImage(prompt, request, judgeFn) {
+  const seed = Math.floor(Math.random() * 2_000_000_000);
+  const z = SPACES.find((s) => s.id === "z-image-turbo");
+  const f = SPACES.find((s) => s.id === "flux-schnell");
+  const jobs = [spaceImage(z, prompt, seed), spaceImage(z, prompt, seed + 7919), spaceImage(f, prompt, seed + 104729)];
+  const results = (await Promise.allSettled(jobs)).filter((r) => r.status === "fulfilled").map((r) => r.value);
+  if (!results.length) throw new Error("best-of: no candidate succeeded");
+  if (results.length === 1 || !judgeFn) return { ...results[0], candidates: results.length };
+  try {
+    const i = await pickBest(results, request || prompt, judgeFn);
+    return { ...results[i], candidates: results.length, judged: true };
+  } catch { return { ...results[0], candidates: results.length }; }
 }
