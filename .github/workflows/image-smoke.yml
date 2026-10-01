@@ -69,4 +69,4 @@ jobs:
             console.log('PROMPT', ((Date.now() - t0) / 1000).toFixed(1) + 's', en);
             const t1 = Date.now();
             const r = await bestImage(en, req, (m) => directText(m, { max_tokens: 50 }));
-            console.log('BEST_OK', r.provider, 'candidates=' + r.candidates, 'judged=' + !!r.judged, ((Date.now() - t1) / 1000).toFixed(1) + 's', r.image.length, 'chars');"
+            console.log('BEST_OK', r.provider, 'candidates=' + r.candidates, 'judged=' + !!r.judged, ((Date.now() - t1) / 1000).toFixed(1) + 's', r.image.length, 'chars', 'errors=' + JSON.stringify(r.errors || []));"

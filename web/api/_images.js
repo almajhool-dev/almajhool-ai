@@ -144,7 +144,8 @@ export async function geminiImage(prompt, apiKey = process.env.GEMINI_API_KEY) {
 
 // ------------------------------------------------------------------ أفضل صورة: نرسم نسختين بالتوازي ويختار Gemini الأقرب للطلب
 async function spaceImage(sp, prompt, seed) {
-  const res = await runSpace(sp, prompt, seed);
+  let res;
+  try { res = await runSpace(sp, prompt, seed); } catch (e) { throw new Error(`${sp.id}: ${e.message}`); }
   const mime = (res.headers.get("content-type") || "").split(";")[0];
   if (!res.ok || !mime.startsWith("image/")) throw new Error(`${sp.id}: HTTP ${res.status}`);
   return { image: `data:${mime};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`, provider: sp.id, model: sp.id };
@@ -169,9 +170,11 @@ export async function bestImage(prompt, request, judgeFn) {
   const z = SPACES.find((s) => s.id === "z-image-turbo");
   const f = SPACES.find((s) => s.id === "flux-schnell");
   const jobs = [spaceImage(z, prompt, seed), spaceImage(z, prompt, seed + 7919), spaceImage(f, prompt, seed + 104729)];
-  const results = (await Promise.allSettled(jobs)).filter((r) => r.status === "fulfilled").map((r) => r.value);
-  if (!results.length) throw new Error("best-of: no candidate succeeded");
-  if (results.length === 1 || !judgeFn) return { ...results[0], candidates: results.length };
+  const settled = await Promise.allSettled(jobs);
+  const results = settled.filter((r) => r.status === "fulfilled").map((r) => r.value);
+  const errors = settled.filter((r) => r.status === "rejected").map((r) => String(r.reason?.message || r.reason).slice(0, 160));
+  if (!results.length) throw new Error("best-of: no candidate succeeded: " + errors.join(" | "));
+  if (results.length === 1 || !judgeFn) return { ...results[0], candidates: results.length, errors };
   try {
     const i = await pickBest(results, request || prompt, judgeFn);
     return { ...results[i], candidates: results.length, judged: true };
