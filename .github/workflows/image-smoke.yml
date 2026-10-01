@@ -56,6 +56,7 @@ jobs:
                   console.log('GEMINI_IMAGE_OK', r.model, r.image.length, 'chars', (Date.now() - t) + 'ms'); }
             catch (e) { console.log('GEMINI_IMAGE_FAIL', e.message.slice(0, 600)); }"
       - name: Full path — Gemini prompt + best-of-3 + Gemini judge (real key)
+        continue-on-error: true  # حصة ZeroGPU لخادم الاختبار نفسه قد تنتهي
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
