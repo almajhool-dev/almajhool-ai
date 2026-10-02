@@ -10,10 +10,10 @@ const BASE = [
     id: "gemini", label: "Google Gemini", key: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     // كل نموذج إله حصة مجانية منفصلة: إذا واحد وصل حده ننتقل للي بعده
-    models: ["gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash-lite"],
+    models: ["gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"],
     // نماذج Gemini «تفكّر» قبل الرد: نخلي التفكير قليل حتى ما يستهلك كل التوكنات ويطلع الرد فارغ
     extra: { reasoning_effort: "low" },
-    minTokens: 1024, lite: ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"],
+    minTokens: 1024, lite: ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"],
   },
   {
     // بالتجربة: Nemotron Ultra يجاوب عراقي ممتاز
