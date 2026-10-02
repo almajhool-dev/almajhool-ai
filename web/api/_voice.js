@@ -46,7 +46,12 @@ export async function transcribe(audio, mime = "audio/ogg") {
         }
         const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
         let out = {};
-        try { out = JSON.parse((text.match(/\{[\s\S]*\}/) || ["{}"])[0]); } catch { out = { transcript: text }; }
+        try { out = JSON.parse((text.match(/\{[\s\S]*\}/) || ["{}"])[0]); }
+        catch { // أحيانًا يرجع JSON مكسور: نطلع النص بنفسنا، وإذا بيه رموز \u مكسورة نجرب نموذج ثاني
+          const m = text.match(/"transcript"\s*:\s*"([^"]*)"/);
+          out = { transcript: m ? m[1] : text, dialect: text.match(/"dialect"\s*:\s*"(\w+)"/)?.[1] };
+          if (/\\u0?6?\\|\\u0\b|^\s*\{/.test(out.transcript)) { errors.push(`${model}: bad json`); continue; }
+        }
         const transcript = String(out.transcript || "").trim();
         if (transcript) return { transcript, dialect: String(out.dialect || "other").toLowerCase() };
         errors.push(`${model}: empty`);

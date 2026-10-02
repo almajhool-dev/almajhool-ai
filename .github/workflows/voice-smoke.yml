@@ -53,7 +53,10 @@ jobs:
             const variants = {
               edge_raw: () => edgeTTS(T, 'ar-IQ-BasselNeural'),
               edge_normalized: () => edgeTTS(normalizeForTTS(T), 'ar-IQ-BasselNeural'),
-              gemini_tts: () => geminiTTS(T, 'iraqi'),
+              gemini_tts_default: () => geminiTTS(T, 'iraqi'),
+              tts_3_8_flash: () => (process.env.GEMINI_TTS_MODELS = 'gemini-3.8-flash-tts', geminiTTS(T, 'iraqi')),
+              tts_3_1_preview: () => (process.env.GEMINI_TTS_MODELS = 'gemini-3.1-flash-tts-preview', geminiTTS(T, 'iraqi')),
+              tts_2_5_flash: () => (process.env.GEMINI_TTS_MODELS = 'gemini-2.5-flash-preview-tts', geminiTTS(T, 'iraqi')),
             };
             console.log('ORIGINAL   ', T);
             for (const [name, fn] of Object.entries(variants)) {
