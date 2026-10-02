@@ -46,7 +46,8 @@ export async function transcribe(audio, mime = "audio/ogg") {
       out = { transcript: m ? m[1] : text, dialect: text.match(/"dialect"\s*:\s*"(\w+)"/)?.[1] };
       if (/\\u0?6?\\|\\u0\b|^\s*\{/.test(out.transcript)) throw new Error(`${model}: bad json`);
     }
-    const transcript = String(out.transcript || "").trim();
+    // أحيانًا النموذج يرجع الحروف كرموز \u0623… بدل العربي: نرجعها حروف
+    const transcript = String(out.transcript || "").replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).trim();
     if (!transcript) throw new Error(`${model}: empty`);
     return { transcript, dialect: String(out.dialect || "other").toLowerCase() };
   };
