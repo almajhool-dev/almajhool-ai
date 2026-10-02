@@ -96,18 +96,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: env.TEST_VIDEO_URL != '' && needs.process.result == 'success'
         with: { name: result, path: "work/out*.mp4", retention-days: 3 }
-      - name: Test only — side-by-side preview (left ordinary bicubic, right AI)
+      - name: Test only — result size (and remove the old preview branch)
         if: env.TEST_VIDEO_URL != '' && needs.process.result == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           OUT=$(ls work/out*.mp4 | tail -1); ffprobe -v error -show_entries stream=width,height:format=duration,size -of compact "$OUT"
-          W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$OUT"); H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$OUT")
-          ffmpeg -v error -y -ss 6 -i work/src.mkv -frames:v 1 -vf "scale=${W}:${H}:flags=bicubic,crop=iw/3:ih/3:iw/3:ih/3" a.png
-          ffmpeg -v error -y -ss 6 -i "$OUT" -frames:v 1 -vf "crop=iw/3:ih/3:iw/3:ih/3" b.png
-          ffmpeg -v error -y -i a.png -i b.png -filter_complex hstack preview.png
-          git config user.name ci; git config user.email ci@example.com
-          git checkout --orphan ci-preview-video && git rm -rfq . > /dev/null && git add -f preview.png && git commit -qm preview && git push -fq origin ci-preview-video
+          git push -q origin --delete ci-preview-video 2>/dev/null || true
       - name: Tell the user if something failed
         if: needs.process.result != 'success'
         run: |
