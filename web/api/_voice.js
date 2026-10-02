@@ -5,7 +5,12 @@ import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 
 const GEMINI_KEYS = () => String(process.env.GEMINI_API_KEY || "").split(/[\s,]+/).filter(Boolean);
-const LISTEN_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+const LISTEN_MODELS = () => {
+  const custom = String(process.env.GEMINI_LISTEN_MODELS || process.env.GEMINI_MODELS || "").split(",").map((x) => x.trim()).filter(Boolean);
+  return custom.length ? custom : ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+};
+const gone = new Set(); // نماذج انشالت أو ما متاحة لهذا المفتاح — ما نرجعلها
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** يرجع { transcript, dialect } من ملف صوت (Buffer) */
 export async function transcribe(audio, mime = "audio/ogg") {
@@ -13,7 +18,9 @@ export async function transcribe(audio, mime = "audio/ogg") {
 - transcript: exactly what the speaker said, in the original language and dialect, written in its own script (Arabic dialects in Arabic letters, keep dialect words as spoken, do not translate or correct to MSA).
 - dialect: one of iraqi, gulf, saudi, egyptian, levantine, maghrebi, sudanese, yemeni, msa, english, other.`;
   const errors = [];
-  for (const model of LISTEN_MODELS) {
+  let waited = false;
+  for (let pass = 0; pass < 2; pass++) for (const model of LISTEN_MODELS()) {
+    if (gone.has(model)) continue;
     for (const key of GEMINI_KEYS()) {
       try {
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -21,12 +28,21 @@ export async function transcribe(audio, mime = "audio/ogg") {
           headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ inline_data: { mime_type: mime, data: Buffer.from(audio).toString("base64") } }, { text: prompt }] }],
-            generationConfig: { temperature: 0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
+            generationConfig: { temperature: 0, responseMimeType: "application/json" },
           }),
           signal: AbortSignal.timeout(60_000),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) { errors.push(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 120)}`); continue; }
+        if (!r.ok) {
+          errors.push(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 120)}`);
+          if (r.status === 404) gone.add(model);
+          // حد الدقيقة: ننتظر مرة وحدة شوية ونكمل (بالجولة الثانية نرجع نجرب)
+          if (r.status === 429 && !waited && pass === 0) {
+            const delay = Number(String(JSON.stringify(j)).match(/"retryDelay":"(\d+)/)?.[1] || 8);
+            if (delay <= 20) { waited = true; await sleep(delay * 1000); }
+          }
+          continue;
+        }
         const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
         let out = {};
         try { out = JSON.parse((text.match(/\{[\s\S]*\}/) || ["{}"])[0]); } catch { out = { transcript: text }; }
@@ -36,7 +52,7 @@ export async function transcribe(audio, mime = "audio/ogg") {
       } catch (e) { errors.push(`${model}: ${e.message}`); }
     }
   }
-  throw new Error("ما گدرت أسمع البصمة: " + errors.slice(0, 3).join(" | "));
+  throw new Error("ما گدرت أسمع البصمة: " + errors.slice(0, 6).join(" | "));
 }
 
 // صوت لكل لهجة (أصوات رجالية افتراضيًا)
