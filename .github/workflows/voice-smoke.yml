@@ -1,0 +1,53 @@
+name: Voice smoke test
+
+# يجرّب البصمات من شبكة حقيقية: نطق عراقي (Edge) ← Gemini يسمعه ويعرف لهجته ← احتياط Google
+on:
+  push:
+    paths: ["web/api/_voice.js", ".github/workflows/voice-smoke.yml"]
+  workflow_dispatch:
+
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Gemini models available to this key
+        continue-on-error: true
+        run: |
+          curl -fsS -H "x-goog-api-key: $GEMINI_API_KEY" "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" \
+            | jq -r '.models[] | select(.supportedGenerationMethods | index("generateContent")) | .name' | sed 's#models/##' | tr '\n' ' '
+      - name: Speak in several dialects (Edge voices)
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { edgeTTS, VOICES } from './api/_voice.js'; import fs from 'fs';
+            const lines = { iraqi: 'هلو حبيبي شلونك، شكو ماكو؟ اليوم الجو كلش حلو', gulf: 'هلا والله، شخبارك؟ وايد زين', egyptian: 'إزيك يا صاحبي، عامل إيه النهارده؟', levantine: 'كيفك يا زلمة، شو الأخبار؟' };
+            for (const [d, t] of Object.entries(lines)) {
+              const s = Date.now();
+              try { const a = await edgeTTS(t, VOICES[d]); fs.writeFileSync(d + '.mp3', a); console.log('TTS_OK', d, VOICES[d], a.length, 'bytes', (Date.now() - s) + 'ms'); }
+              catch (e) { console.log('TTS_FAIL', d, e.message); process.exitCode = 1; }
+            }"
+      - name: Gemini listens and detects the dialect (real key)
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { transcribe } from './api/_voice.js'; import fs from 'fs';
+            for (const d of ['iraqi', 'gulf', 'egyptian', 'levantine']) {
+              if (!fs.existsSync(d + '.mp3')) continue;
+              const s = Date.now();
+              try { const r = await transcribe(fs.readFileSync(d + '.mp3'), 'audio/mpeg'); console.log('HEARD', d, '=>', r.dialect, '|', r.transcript, (Date.now() - s) + 'ms'); }
+              catch (e) { console.log('HEAR_FAIL', d, e.message); process.exitCode = 1; }
+            }"
+      - name: Fallback voice (Google)
+        working-directory: web
+        continue-on-error: true
+        run: |
+          node --input-type=module -e "
+            import { googleTTS } from './api/_voice.js';
+            try { const a = await googleTTS('هلو، هذا صوت احتياطي'); console.log('GOOGLE_TTS_OK', a.length); } catch (e) { console.log('GOOGLE_TTS_FAIL', e.message); }"

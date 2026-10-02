@@ -8,6 +8,7 @@ import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
+import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -52,9 +53,20 @@ async function sendPhoto(chat_id, buffer, mime, caption, extra = {}) {
   if (!j.ok) throw new Error(j.description || "sendPhoto failed");
 }
 
+async function sendVoice(chat_id, buffer, caption) {
+  const fd = new FormData();
+  fd.append("chat_id", String(chat_id));
+  fd.append("voice", new Blob([buffer], { type: "audio/mpeg" }), "reply.mp3");
+  if (caption) fd.append("caption", caption.slice(0, 1024));
+  const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, { method: "POST", body: fd });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) throw new Error(j.description || "sendVoice failed");
+}
+
 /** نص طويل يتقسم على عدة رسائل، ونشيل رموز Markdown حتى يطلع نظيف */
+const cleanText = (text) => String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#{1,6}\s*/gm, "").replace(/^\s*[-*]\s+/gm, "• ").trim();
 async function sendLong(chat_id, text) {
-  const clean = String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#{1,6}\s*/gm, "").replace(/^\s*[-*]\s+/gm, "• ").trim() || "…";
+  const clean = cleanText(text) || "…";
   for (let i = 0; i < clean.length; i += 4000) await send(chat_id, clean.slice(i, i + 4000));
 }
 
@@ -85,12 +97,14 @@ async function chatState(chat_id, user_id) {
 }
 
 // ───── القدرات ─────
-async function doChat(chat_id, user, state, text) {
+async function doChat(chat_id, user, state, text, { voice } = {}) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.tokens >= user.daily_tokens) return send(chat_id, "وصلت حدك اليومي من التوكنات. يتجدد غدًا 🌙");
-  await action(chat_id, "typing");
+  await action(chat_id, voice ? "record_voice" : "typing");
   const history = Array.isArray(state.history) ? state.history.slice(-12) : [];
-  const messages = [{ role: "system", content: SYSTEM }, ...history, { role: "user", content: text }];
+  // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
+  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت: رد بـ${DIALECT_NAMES[voice] || DIALECT_NAMES.other} بالضبط مثل ما يحچي هو، بكلام طبيعي محكي وقصير (أقل من 80 كلمة)، بدون نقاط أو رموز أو إيموجي أو روابط أو كود.` : SYSTEM;
+  const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
   let answer = "";
   try {
     if (!directConfigured().length) throw new Error("no direct");
@@ -101,7 +115,17 @@ async function doChat(chat_id, user, state, text) {
     if (!r.ok) return send(chat_id, "صار خلل بالنماذج، جرّب بعد شوية 🙏");
     answer = d.text || "";
   }
-  await sendLong(chat_id, answer);
+  let spoken = false;
+  if (voice) {
+    try {
+      await action(chat_id, "record_voice");
+      const { audio } = await speak(answer, voice);
+      const caption = cleanText(answer);
+      await sendVoice(chat_id, audio, caption.length <= 1000 ? caption : "");
+      spoken = true;
+    } catch (e) { console.error("voice reply", e.message); }
+  }
+  if (!spoken) await sendLong(chat_id, answer);
   const next = [...history, { role: "user", content: text.slice(0, 4000) }, { role: "assistant", content: answer.slice(0, 4000) }].slice(-12);
   await sql`UPDATE tg_chats SET history = ${JSON.stringify(next)}::jsonb WHERE chat_id = ${chat_id}`;
   await logUsage(user.id, "chat", estTokens(JSON.stringify(messages)) + estTokens(answer), "telegram", null);
@@ -174,6 +198,7 @@ const WELCOME = `أهلًا وسهلًا بيك بـ «المبرمج المجه
 اكتب طلبك وأنا أسويه لك:
 🎨 تريد صورة؟ اكتب: صمملي صورة …
 🌐 تريد موقع؟ اكتب: ابنيلي موقع … وأدزلك رابطه جاهز
+🎙 دز بصمة وأرد عليك بصوت وبنفس لهجتك
 💬 أو اسألني أي سؤال`;
 
 async function handle(update) {
@@ -185,12 +210,30 @@ async function handle(update) {
     if (!/^\/ai(@\w+)?\s/i.test(text)) return;
     text = text.replace(/^\/ai(@\w+)?\s+/i, "");
   }
-  if (!text) return send(chat_id, "اكتب طلبك كنص (مثلًا: ارسملي قطة، أو ابنيلي موقع) ✍️");
+  const media = msg.chat.type === "private" ? (msg.voice || msg.audio || msg.video_note) : null;
+  if (!text && !media) return send(chat_id, "اكتب طلبك أو دز بصمة 🎙");
   const user = await tgUser(msg.from);
   if (user.banned) return send(chat_id, "تم إيقاف حسابك من قبل الإدارة.");
   const state = await chatState(chat_id, user.id);
+  let voice = null;
+  if (media && !text) { // بصمة: نسمعها ونحولها لكلام، ونعرف لهجته حتى نرد بنفسها
+    if ((media.file_size || 0) > 20 * 1024 * 1024 || (media.duration || 0) > 600) return send(chat_id, "البصمة طويلة كلش، دز وحدة أقصر من 10 دقايق 🙏");
+    await action(chat_id, "typing");
+    const file = await tg("getFile", { file_id: media.file_id });
+    if (!file?.file_path) return send(chat_id, "ما گدرت أحمّل البصمة، دزها مرة ثانية 🙏");
+    const r = await fetch(`https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`);
+    const audio = Buffer.from(await r.arrayBuffer());
+    const mime = msg.voice ? "audio/ogg" : msg.video_note ? "video/mp4" : (media.mime_type || "audio/mpeg");
+    let heard;
+    try { heard = await transcribe(audio, mime); }
+    catch (e) { console.error(e.message); return send(chat_id, "ما گدرت أسمع البصمة زين، دزها مرة ثانية أو اكتب طلبك 🙏"); }
+    text = heard.transcript; voice = heard.dialect || "iraqi";
+  }
   if (/^\/(start|help)\b/i.test(text)) return send(chat_id, WELCOME);
-  if (ASKS_ABOUT.test(text)) return send(chat_id, ABOUT);
+  if (ASKS_ABOUT.test(text)) {
+    if (voice) { try { return await sendVoice(chat_id, (await speak("تم بنائي بواسطة المبرمج المجهول", voice)).audio, ABOUT); } catch { } }
+    return send(chat_id, ABOUT);
+  }
   if (/^\/new\b/i.test(text)) {
     await sql`UPDATE tg_chats SET history = '[]'::jsonb, site_slug = NULL WHERE chat_id = ${chat_id}`;
     return send(chat_id, "✨ بدينا من جديد. اكتب طلبك.");
@@ -209,7 +252,7 @@ async function handle(update) {
   if (intent.type === "image") return doImage(chat_id, user, text);
   if (intent.type === "site") return doSite(chat_id, user, state, text, intent.kind, false);
   if (intent.type === "edit") return doSite(chat_id, user, state, text, null, true);
-  return doChat(chat_id, user, state, text);
+  return doChat(chat_id, user, state, text, { voice });
 }
 
 export async function POST(request) {
