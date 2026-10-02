@@ -24,7 +24,8 @@ export async function wakeWorker() {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json", "User-Agent": "almajhool-ai" },
     body: JSON.stringify({ event_type: "upscale" }),
-  }).catch(() => null);
+  }).catch((e) => { console.error("wakeWorker:", e?.message); return null; });
+  if (r && !r.ok) console.error("wakeWorker: GitHub HTTP", r.status, (await r.text().catch(() => "")).slice(0, 200));
   return !!r?.ok;
 }
 
