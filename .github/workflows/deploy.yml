@@ -119,6 +119,13 @@ jobs:
             echo "::warning::VERCEL_TOKEN missing — skipping site deploy"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Check the video wake-up key (GH_DISPATCH_TOKEN)
+        run: |
+          if [ -z "$GH_DISPATCH_TOKEN" ]; then echo "::warning::GH_DISPATCH_TOKEN missing — videos wait for a manual start"; exit 0; fi
+          CODE=$(curl -s -o /tmp/d.json -w "%{http_code}" -X POST -H "Authorization: Bearer $GH_DISPATCH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/dispatches" -d '{"event_type":"token-check"}')
+          if [ "$CODE" = "204" ]; then echo "GH_DISPATCH_TOKEN works: videos start instantly"
+          else echo "::warning::GH_DISPATCH_TOKEN does not work (HTTP $CODE): $(cat /tmp/d.json)"; fi
       - uses: actions/setup-node@v4
         if: steps.check.outputs.ok == 'true'
         with: { node-version: 22 }
