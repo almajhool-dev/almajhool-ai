@@ -13,7 +13,7 @@ async function gatewayDraft(messages, max_tokens) {
 }
 
 /** يرجع مسودات من كل المصادر بالتوازي: [{ text, by }] */
-export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1500 } = {}) {
+export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1500, enough = 3, grace = 4000 } = {}) {
   const jobs = [];
   for (const p of directConfigured()) {
     // Gemini: مسودته من النموذج الخفيف حتى نخلي حصة القوي للجواب النهائي
@@ -25,10 +25,23 @@ export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1
     }
   }
   if (process.env.GATEWAY_URL) jobs.push(withTimeout(gatewayDraft(messages, max_tokens), timeout + 3000));
-  const done = await Promise.allSettled(jobs);
+  // ننتظر الكل، بس إذا وصلت «enough» أجوبة ننتظر الباقين شوية بس (grace) حتى ما يأخرنا نموذج بطيء
+  const got = [];
+  await new Promise((resolve) => {
+    let pending = jobs.length, graceTimer = null;
+    if (!pending) return resolve();
+    const hard = setTimeout(resolve, timeout + 3500);
+    const finish = () => { clearTimeout(hard); clearTimeout(graceTimer); resolve(); };
+    for (const j of jobs) {
+      j.then((v) => { if (v?.text?.trim()) got.push(v); }, () => {}).finally(() => {
+        pending -= 1;
+        if (!pending) return finish();
+        if (got.length >= enough && !graceTimer) graceTimer = setTimeout(finish, grace);
+      });
+    }
+  });
   const seen = new Set();
-  return done.filter((r) => r.status === "fulfilled" && r.value.text?.trim())
-    .map((r) => r.value)
+  return got
     .filter((d) => { const k = d.text.trim().slice(0, 200); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 

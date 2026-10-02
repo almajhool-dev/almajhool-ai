@@ -36,7 +36,10 @@ jobs:
             console.log('SOURCES', ensembleSources().join(', '));
             const q = [{ role: 'system', content: 'أنت مساعد ذكي، رد بنفس لهجة المستخدم وباختصار.' }, { role: 'user', content: 'شلون أتعلم البرمجة من الصفر وأنا بالعراق؟ جاوب بثلاث نقاط قصيرة باللهجة العراقية' }];
             const s = Date.now();
-            const drafts = await collectDrafts(q, { timeout: 22000 });
+            const all = await collectDrafts(q, { timeout: 22000, enough: 99 });
+            console.log('ALL_DRAFTS (no early finish)', all.map((d) => d.by).join(', '));
+            const s2 = Date.now(); const drafts = await collectDrafts(q, { timeout: 22000 });
+            console.log('EARLY_FINISH', drafts.length, 'drafts in', (Date.now() - s2) + 'ms');
             console.log('DRAFTS', drafts.length, 'in', (Date.now() - s) + 'ms');
             for (const d of drafts) console.log('  DRAFT', d.by.padEnd(28), '|', d.text.replace(/\s+/g, ' ').slice(0, 140));
             const t = Date.now();
