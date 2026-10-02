@@ -110,7 +110,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   await action(chat_id, voice ? "record_voice" : "typing");
   const history = Array.isArray(state.history) ? state.history.slice(-12) : [];
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
-  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت: رد بـ${DIALECT_NAMES[voice] || DIALECT_NAMES.other} بالضبط مثل ما يحچي هو، بكلام طبيعي محكي وقصير (أقل من 80 كلمة)، بدون نقاط أو رموز أو إيموجي أو روابط أو كود.` : SYSTEM;
+  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت: رد بـ${DIALECT_NAMES[voice] || DIALECT_NAMES.iraqi} دائمًا (حتى لو هو حچى بلهجة ثانية)، بكلام طبيعي محكي وقصير (أقل من 80 كلمة)، بدون نقاط أو رموز أو إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
   let answer = "";
   try {
@@ -276,7 +276,7 @@ async function handleMessage(update) {
     let heard;
     try { heard = await transcribe(audio, mime); }
     catch (e) { console.error(e.message); return send(chat_id, "ما گدرت أسمع البصمة زين، دزها مرة ثانية أو اكتب طلبك 🙏"); }
-    text = heard.transcript; voice = heard.dialect || "iraqi";
+    text = heard.transcript; voice = "iraqi"; // الرد بالبصمة دائمًا بالعراقي (هذا اللي يريده صاحب البوت)، مهما كانت لهجة المتكلم
   }
   if (/^\/(start|help)\b/i.test(text)) return send(chat_id, WELCOME);
   let provider = "auto";
