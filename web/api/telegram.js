@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import { GPT_IDS, directConfigured, directText } from "./_direct.js";
 import { ensembleAnswer } from "./_ensemble.js";
+import { needsSearch, searchAnswer } from "./_search.js";
 import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
@@ -16,7 +17,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || (TOKEN ? createHash("sha256").update(TOKEN).digest("hex").slice(0, 48) : "");
 const SITE = (process.env.PUBLIC_URL || "https://almajhool-ai.vercel.app").replace(/\/$/, "");
 
-const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…). لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
+const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. الدقة أهم شي: لا تخترع أسماء أو تواريخ أو أرقام، وإذا المستخدم ذكر معلومة لا توافقه عليها إلا إذا متأكد إنها صحيحة، وإذا ما متأكد گول بصراحة. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…). لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
 
 // ───── Telegram API ─────
 async function tg(method, body) {
@@ -117,6 +118,10 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
       // كل النماذج المتصلة تجاوب بنفس اللحظة، وبعدها نطلع جواب واحد قوي منهم
       try { answer = (await ensembleAnswer(messages, { draftTimeout: voice ? 15_000 : 22_000 })).text; }
       catch (e) { console.error("ensemble", e.message); }
+    }
+    // إذا تجميع النماذج ما نجح وسؤاله عن حقيقة: نجاوب من بحث Google مباشرة
+    if (!answer && provider === "auto" && needsSearch(text)) {
+      try { answer = (await searchAnswer(text, { history })).text; } catch (e) { console.error("search", e.message); }
     }
     if (!answer) answer = await directText(messages, { max_tokens: 4096, timeout: 60_000, provider });
   } catch {
