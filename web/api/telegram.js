@@ -11,6 +11,7 @@ import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
+import { ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -208,12 +209,30 @@ async function doSite(chat_id, user, state, text, kind, isEdit) {
   await send(chat_id, msg);
 }
 
+async function queueVideo(msg, video) {
+  const chat_id = msg.chat.id;
+  const user = await tgUser(msg.from);
+  if (user.banned) return send(chat_id, "تم إيقاف حسابك من قبل الإدارة.");
+  await ensureVideoTable();
+  const [{ n }] = await sql`SELECT count(*)::int AS n FROM video_jobs WHERE user_id = ${user.id} AND created_at >= date_trunc('day', now())`;
+  const limit = Number(process.env.DAILY_VIDEOS) || 10;
+  if (user.role !== "admin" && n >= limit) return send(chat_id, `وصلت حدك اليومي (${limit} مقاطع). يتجدد غدًا 🌙`);
+  const [{ q }] = await sql`SELECT count(*)::int AS q FROM video_jobs WHERE status IN ('pending', 'processing')`;
+  const mins = Math.max(2, Math.round(((video.duration || 30) / 60) * 6));
+  const status = await send(chat_id, `🎬 استلمت المقطع وراح أرفع دقته بالذكاء الاصطناعي وأدزه إلك أول ما يخلص.\n⏳ الوقت المتوقع تقريبًا ${mins}–${mins * 2} دقيقة${q ? ` (قبله ${q} بالطابور)` : ""}. تگدر تكمل شغلك بالبوت عادي.`);
+  await sql`INSERT INTO video_jobs (id, user_id, chat_id, message_id, file_id, file_size, duration, width, height, status_message_id)
+    VALUES (${randomId(8)}, ${user.id}, ${chat_id}, ${msg.message_id}, ${video.file_id}, ${video.file_size || null}, ${video.duration || null},
+            ${video.width || null}, ${video.height || null}, ${status?.message_id || null})`;
+  await wakeWorker();
+}
+
 const WELCOME = `أهلًا وسهلًا بيك بـ «المبرمج المجهول AI» 👋
 
 اكتب طلبك وأنا أسويه لك:
 🎨 تريد صورة؟ اكتب: صمملي صورة …
 🌐 تريد موقع؟ اكتب: ابنيلي موقع … وأدزلك رابطه جاهز
 🎙 دز بصمة وأرد عليك بصوت وبنفس لهجتك
+🎬 دز مقطع فيديو وأرفع دقته وأرجعه إلك
 💬 أو اسألني أي سؤال`;
 
 async function handle(update) {
@@ -225,6 +244,10 @@ async function handle(update) {
     if (!/^\/ai(@\w+)?\s/i.test(text)) return;
     text = text.replace(/^\/ai(@\w+)?\s+/i, "");
   }
+  // مقطع فيديو: نرفع دقته بالذكاء الاصطناعي على أجهزة GitHub ونرجعه
+  const video = msg.chat.type === "private"
+    ? (msg.video || msg.animation || (msg.document && /^video\//.test(msg.document.mime_type || "") ? msg.document : null)) : null;
+  if (video) return queueVideo(msg, video);
   const media = msg.chat.type === "private" ? (msg.voice || msg.audio || msg.video_note) : null;
   if (!text && !media) return send(chat_id, "اكتب طلبك أو دز بصمة 🎙");
   const user = await tgUser(msg.from);
