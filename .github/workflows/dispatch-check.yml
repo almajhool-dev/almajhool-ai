@@ -1,4 +1,4 @@
-name: Dispatch token check
+name: Dispatch token check  # recheck
 on:
   push:
     branches-ignore: [main]
