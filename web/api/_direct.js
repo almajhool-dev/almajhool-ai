@@ -24,13 +24,15 @@ export const DIRECT = [
     models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
   },
   {
-    id: "chatgpt-openrouter", label: "ChatGPT (OpenAI GPT-OSS عبر OpenRouter)", key: "OPENROUTER_API_KEY",
+    // OpenRouter: نماذج قوية مجانية (NVIDIA Nemotron Ultra 550B، Qwen 3.8، Google Gemma 4…)
+    id: "openrouter", label: "OpenRouter (Nemotron Ultra 550B وغيره مجانًا)", key: "OPENROUTER_API_KEY",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    models: ["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free"],
+    // بالتجربة: Nemotron Ultra يجاوب عراقي ممتاز. (openrouter/free يروح أحيانًا لنموذج فلترة بدون جواب، وInkling ممنوع خارج الوكلاء)
+    models: ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "qwen/qwen3.8-27b:free", "google/gemma-4-31b-it:free"],
   },
 ];
 
-export const GPT_IDS = ["chatgpt", "chatgpt-groq", "chatgpt-openrouter"];
+export const GPT_IDS = ["chatgpt", "chatgpt-groq"];
 
 const keysOf = (p) => {
   const keys = String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
