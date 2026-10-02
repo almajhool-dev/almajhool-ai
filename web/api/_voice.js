@@ -8,9 +8,14 @@ import { Mp3Encoder } from "@breezystack/lamejs";
 const GEMINI_KEYS = () => String(process.env.GEMINI_API_KEY || "").split(/[\s,]+/).filter(Boolean);
 const LISTEN_MODELS = () => {
   const custom = String(process.env.GEMINI_LISTEN_MODELS || process.env.GEMINI_MODELS || "").split(",").map((x) => x.trim()).filter(Boolean);
-  return custom.length ? custom : ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+  return custom.length ? custom : [
+    // كل نموذج إله حصة مجانية منفصلة: كل ما زادت النماذج، صعب تخلص الحصة وتعلگ البصمة
+    "gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest", "gemini-3.7-flash", "gemini-3.6-flash",
+    "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash",
+  ];
 };
 const gone = new Set(); // نماذج انشالت أو ما متاحة لهذا المفتاح — ما نرجعلها
+const tired = new Map(); // نموذج خلصت حصته: نتركه 3 دقايق ونجرب غيره
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** يرجع { transcript, dialect } من ملف صوت (Buffer) */
@@ -35,6 +40,7 @@ export async function transcribe(audio, mime = "audio/ogg") {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       if (r.status === 404) gone.add(model);
+      if (r.status === 429) tired.set(model, Date.now() + 180_000);
       if (r.status === 429) retryDelay = Math.max(retryDelay, Number(String(JSON.stringify(j)).match(/"retryDelay":"(\d+)/)?.[1] || 8));
       throw new Error(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 120)}`);
     }
@@ -52,7 +58,9 @@ export async function transcribe(audio, mime = "audio/ogg") {
     return { transcript, dialect: String(out.dialect || "other").toLowerCase() };
   };
   for (let pass = 0; pass < 2; pass++) {
-    const tries = LISTEN_MODELS().filter((m) => !gone.has(m)).flatMap((m) => GEMINI_KEYS().map((k) => [m, k]));
+    const live = LISTEN_MODELS().filter((m) => !gone.has(m));
+    const fresh = live.filter((m) => !(tired.get(m) > Date.now()));
+    const tries = (fresh.length ? fresh : live).flatMap((m) => GEMINI_KEYS().map((k) => [m, k]));
     // أول نموذجين يسمعون بنفس الوقت وناخذ الأسرع، وبعدها الباقي واحد واحد
     try { return await Promise.any(tries.slice(0, 2).map(([m, k]) => once(m, k, 25_000))); }
     catch (e) { errors.push(...(e.errors || [e]).map((x) => x.message)); }
