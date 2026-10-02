@@ -25,11 +25,22 @@ jobs:
       - name: Free models on OpenRouter right now
         run: |
           curl -fsS https://openrouter.ai/api/v1/models | jq -r '.data[] | select(.pricing.prompt == "0" and .pricing.completion == "0") | "\(.id)  ctx=\(.context_length)"' | sort | head -80
+      - name: Each OpenRouter free model answers in Iraqi
+        if: env.OPENROUTER_API_KEY != ''
+        run: |
+          node --input-type=module -e "
+            import { DIRECT, directChat } from './web/api/_direct.js';
+            for (const m of DIRECT.find((p) => p.id === 'openrouter').models) {
+              process.env.OPENROUTER_MODELS = m; const s = Date.now();
+              try { const { res } = await directChat({ provider: 'openrouter', stream: false, max_tokens: 400, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
+                    const j = await res.json(); console.log('OR_OK', m, (Date.now() - s) + 'ms', j.model || '', '|', String(j.choices?.[0]?.message?.content || '').slice(0, 160).replace(/\n/g, ' ')); }
+              catch (e) { console.log('OR_FAIL', m, e.message.slice(0, 200)); }
+            }"
       - name: Ask ChatGPT (each configured route)
         run: |
           node --input-type=module -e "
             import { GPT_IDS, directChat, directConfigured } from './web/api/_direct.js';
-            const ids = directConfigured().map((p) => p.id).filter((id) => GPT_IDS.includes(id));
+            const ids = directConfigured().map((p) => p.id).filter((id) => [...GPT_IDS, 'openrouter'].includes(id));
             if (!ids.length) { console.log('NO_GPT_KEY — add one of POLLINATIONS_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY'); process.exit(0); }
             for (const id of ids) {
               const s = Date.now();

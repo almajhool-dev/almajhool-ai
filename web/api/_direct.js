@@ -24,13 +24,14 @@ export const DIRECT = [
     models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
   },
   {
-    id: "chatgpt-openrouter", label: "ChatGPT (OpenAI GPT-OSS عبر OpenRouter)", key: "OPENROUTER_API_KEY",
+    // OpenRouter: نماذج قوية مجانية (Nemotron Ultra 550B، Qwen 3.8، Gemma 4، Inkling…) + موجّه تلقائي لأحسن نموذج مجاني
+    id: "openrouter", label: "OpenRouter (نماذج مجانية قوية)", key: "OPENROUTER_API_KEY",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    models: ["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free"],
+    models: ["openrouter/free", "nvidia/nemotron-3-ultra-550b-a55b:free", "qwen/qwen3.8-27b:free", "google/gemma-4-31b-it:free", "thinkingmachines/inkling:free", "nvidia/nemotron-3-super-120b-a12b:free"],
   },
 ];
 
-export const GPT_IDS = ["chatgpt", "chatgpt-groq", "chatgpt-openrouter"];
+export const GPT_IDS = ["chatgpt", "chatgpt-groq"];
 
 const keysOf = (p) => {
   const keys = String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
