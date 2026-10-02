@@ -12,19 +12,25 @@ export const DIRECT = [
     extra: { reasoning_effort: "low" },
     minTokens: 1024,
   },
+  // ChatGPT ونماذج OpenAI مجانًا — كل واحد يحتاج مفتاح مجاني (أي واحد منهم يكفي)
   {
-    // ChatGPT الحقيقي (نماذج OpenAI) مجانًا عن طريق GitHub Models — يحتاج مفتاح GitHub بصلاحية Models
-    id: "chatgpt", label: "ChatGPT (OpenAI عبر GitHub Models)", key: "GITHUB_MODELS_TOKEN",
-    url: "https://models.github.ai/inference/chat/completions",
-    models: ["openai/gpt-4.1", "openai/gpt-4o", "openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
-  },
-  {
-    // ChatGPT مجاني بدون أي مفتاح (Pollinations) — احتياط إذا ماكو مفتاح GitHub
-    id: "chatgpt-free", label: "ChatGPT (مجاني بدون مفتاح)", keyless: true, key: "POLLINATIONS_API_KEY",
-    url: "https://text.pollinations.ai/openai",
+    id: "chatgpt", label: "ChatGPT (OpenAI GPT-5.4 nano عبر Pollinations)", key: "POLLINATIONS_API_KEY",
+    url: "https://gen.pollinations.ai/v1/chat/completions",
     models: ["openai", "openai-fast"],
   },
+  {
+    id: "chatgpt-groq", label: "ChatGPT (OpenAI GPT-OSS 120B عبر Groq)", key: "GROQ_API_KEY",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+  },
+  {
+    id: "chatgpt-openrouter", label: "ChatGPT (OpenAI GPT-OSS عبر OpenRouter)", key: "OPENROUTER_API_KEY",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    models: ["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free"],
+  },
 ];
+
+export const GPT_IDS = ["chatgpt", "chatgpt-groq", "chatgpt-openrouter"];
 
 const keysOf = (p) => {
   const keys = String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
@@ -66,7 +72,10 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(timeout),
           });
-          if (res.ok) return { res, provider: p.id, model };
+          // بعض الخدمات ترجع 200 بنص عادي (مثل «OK») لمن تكون معطلة: نعتبره فشل حتى ما يطلع جواب فارغ
+          const ctype = res.headers.get("content-type") || "";
+          if (res.ok && /json|event-stream/i.test(ctype)) return { res, provider: p.id, model };
+          if (res.ok) { cooldown.set(ck, Date.now() + 600_000); errors.push(`${p.id}/${model}: unexpected ${ctype || "response"}`); continue; }
           const text = (await res.text()).slice(0, 200);
           cooldown.set(ck, Date.now() + (res.status === 429 ? 60_000 : res.status === 404 || res.status === 400 ? 600_000 : 30_000));
           errors.push(`${p.id}/${model}: HTTP ${res.status} ${text}`);

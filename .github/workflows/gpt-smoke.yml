@@ -1,71 +1,45 @@
 name: ChatGPT smoke test
 
-# يجرّب ChatGPT المجاني من شبكة حقيقية: نماذج OpenAI عبر GitHub Models + Pollinations بدون مفتاح
+# يجرّب ChatGPT المجاني من شبكة حقيقية بالمفاتيح الموجودة بأسرار المستودع (أي واحد يكفي)
 on:
   push:
     paths: ["web/api/_direct.js", ".github/workflows/gpt-smoke.yml"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  models: read
-
 jobs:
   gpt:
     runs-on: ubuntu-latest
+    env:
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Debug GitHub Models endpoint
-        continue-on-error: true
-        env:
-          TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
+      - name: Which ChatGPT keys exist
         run: |
-          for U in https://models.github.ai/inference/chat/completions https://models.inference.ai.azure.com/chat/completions; do
-            echo "== $U"
-            curl -sS -i -X POST "$U" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "Accept: application/json" \
-              -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"say hi"}],"max_tokens":20}' | head -c 1200; echo
+          for K in POLLINATIONS_API_KEY GROQ_API_KEY OPENROUTER_API_KEY; do
+            if [ -n "${!K}" ]; then echo "KEY_PRESENT $K"; else echo "KEY_MISSING $K"; fi
           done
-          curl -sS "https://models.github.ai/catalog/models" -H "Authorization: Bearer $TOKEN" | jq -r '.[].id' 2>/dev/null | grep -i openai | head -20
-      - name: ChatGPT via GitHub Models (OpenAI gpt-4.1 / gpt-4o)
-        continue-on-error: true
-        env:
-          # مفتاح المستودع المؤقت (للتجربة فقط) — بالموقع نستخدم مفتاح GitHub دائم بصلاحية Models
-          GITHUB_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
+      - name: Ask ChatGPT (each configured route)
         run: |
           node --input-type=module -e "
-            import { directChat } from './web/api/_direct.js';
-            const s = Date.now();
-            try {
-              const { res, model } = await directChat({ provider: 'chatgpt', stream: false, max_tokens: 200, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
-              const j = await res.json(); console.log('GH_GPT_OK', model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
-            } catch (e) { console.log('GH_GPT_FAIL', e.message.slice(0, 500)); process.exitCode = 1; }"
-      - name: Pollinations endpoints (raw)
-        continue-on-error: true
-        run: |
-          for U in https://text.pollinations.ai/openai https://gen.pollinations.ai/v1/chat/completions https://text.pollinations.ai/v1/chat/completions; do
-            echo "== $U"
-            curl -sS -i -m 60 -X POST "$U" -H "Content-Type: application/json" \
-              -d '{"model":"openai","messages":[{"role":"user","content":"say hi in Iraqi Arabic"}],"max_tokens":40}' | head -c 900; echo
-          done
-          curl -sS -m 30 https://text.pollinations.ai/models | jq -c '[.[] | {name, description, tier}] | .[:15]' 2>/dev/null | head -c 1500
-      - name: ChatGPT without any key (Pollinations)
-        continue-on-error: true
+            import { GPT_IDS, directChat, directConfigured } from './web/api/_direct.js';
+            const ids = directConfigured().map((p) => p.id).filter((id) => GPT_IDS.includes(id));
+            if (!ids.length) { console.log('NO_GPT_KEY — add one of POLLINATIONS_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY'); process.exit(0); }
+            for (const id of ids) {
+              const s = Date.now();
+              try {
+                const { res, model } = await directChat({ provider: id, stream: false, max_tokens: 300, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
+                const j = await res.json(); console.log('GPT_OK', id, model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
+              } catch (e) { console.log('GPT_FAIL', id, e.message.slice(0, 400)); }
+            }"
+      - name: Non-JSON 200 answers are rejected (no empty replies)
         run: |
           node --input-type=module -e "
-            import { directChat } from './web/api/_direct.js';
-            const s = Date.now();
-            try {
-              const { res, model } = await directChat({ provider: 'chatgpt-free', stream: false, max_tokens: 200, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
-              const j = await res.json(); console.log('FREE_GPT_OK', model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
-            } catch (e) { console.log('FREE_GPT_FAIL', e.message.slice(0, 500)); process.exitCode = 1; }"
-      - name: Streaming works (site chat uses SSE)
-        continue-on-error: true
-        env:
-          GITHUB_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
-        run: |
-          node --input-type=module -e "
-            import { directChat } from './web/api/_direct.js';
-            const { res, provider, model } = await directChat({ provider: ['chatgpt', 'chatgpt-free'], max_tokens: 60, messages: [{ role: 'user', content: 'قل مرحبا' }] });
-            const t = await res.text(); console.log('STREAM', provider, model, res.headers.get('content-type'), t.split('\n').filter((l) => l.startsWith('data:')).length, 'events');"
+            globalThis.fetch = async () => new Response('OK', { status: 200, headers: { 'content-type': 'text/plain' } });
+            process.env.GROQ_API_KEY = 'x';
+            const { directChat } = await import('./web/api/_direct.js');
+            try { await directChat({ provider: 'chatgpt-groq', messages: [{ role: 'user', content: 'hi' }] }); console.log('GUARD_FAIL'); process.exitCode = 1; }
+            catch (e) { console.log('GUARD_OK', e.message); }"

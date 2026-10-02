@@ -3,7 +3,7 @@
 // يحتاج سر واحد بـ GitHub: TELEGRAM_BOT_TOKEN — والنشر التلقائي يربط الـ webhook وحده.
 import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
-import { directConfigured, directText } from "./_direct.js";
+import { GPT_IDS, directConfigured, directText } from "./_direct.js";
 import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
@@ -235,7 +235,7 @@ async function handle(update) {
   }
   if (/^\/(start|help)\b/i.test(text)) return send(chat_id, WELCOME);
   let provider = "auto";
-  if (GPT_REQ.test(text) && text.replace(GPT_REQ, "").trim().length > 2) { provider = ["chatgpt", "chatgpt-free", "gemini"]; text = text.replace(GPT_REQ, "").trim(); }
+  if (GPT_REQ.test(text) && text.replace(GPT_REQ, "").trim().length > 2) { provider = [...GPT_IDS, "gemini"]; text = text.replace(GPT_REQ, "").trim(); }
   if (provider === "auto" && ASKS_ABOUT.test(text)) {
     if (voice) { try { return await sendVoice(chat_id, (await speak("تم بنائي بواسطة المبرمج المجهول", voice)).audio, ABOUT); } catch { } }
     return send(chat_id, ABOUT);
