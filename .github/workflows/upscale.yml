@@ -107,7 +107,7 @@ jobs:
           ffmpeg -v error -y -ss 6 -i "$OUT" -frames:v 1 -vf "crop=iw/3:ih/3:iw/3:ih/3" b.png
           ffmpeg -v error -y -i a.png -i b.png -filter_complex hstack preview.png
           git config user.name ci; git config user.email ci@example.com
-          git checkout --orphan ci-preview-video && git rm -rfq . > /dev/null && cp preview.png preview.png 2>/dev/null; git add -f preview.png && git commit -qm preview && git push -fq origin ci-preview-video
+          git checkout --orphan ci-preview-video && git rm -rfq . > /dev/null && git add -f preview.png && git commit -qm preview && git push -fq origin ci-preview-video
       - name: Tell the user if something failed
         if: needs.process.result != 'success'
         run: |
