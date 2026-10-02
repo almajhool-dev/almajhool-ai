@@ -12,11 +12,26 @@ export const DIRECT = [
     extra: { reasoning_effort: "low" },
     minTokens: 1024,
   },
+  {
+    // ChatGPT الحقيقي (نماذج OpenAI) مجانًا عن طريق GitHub Models — يحتاج مفتاح GitHub بصلاحية Models
+    id: "chatgpt", label: "ChatGPT (OpenAI عبر GitHub Models)", key: "GITHUB_MODELS_TOKEN",
+    url: "https://models.github.ai/inference/chat/completions",
+    models: ["openai/gpt-4.1", "openai/gpt-4o", "openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
+  },
+  {
+    // ChatGPT مجاني بدون أي مفتاح (Pollinations) — احتياط إذا ماكو مفتاح GitHub
+    id: "chatgpt-free", label: "ChatGPT (مجاني بدون مفتاح)", keyless: true, key: "POLLINATIONS_API_KEY",
+    url: "https://text.pollinations.ai/openai",
+    models: ["openai", "openai-fast"],
+  },
 ];
 
-const keysOf = (p) => String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
+const keysOf = (p) => {
+  const keys = String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
+  return keys.length ? keys : p.keyless ? [""] : [];
+};
 const modelsOf = (p) => {
-  const custom = String(process.env[`${p.id.toUpperCase()}_MODELS`] || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const custom = String(process.env[`${p.id.toUpperCase().replace(/-/g, "_")}_MODELS`] || "").split(",").map((s) => s.trim()).filter(Boolean);
   return custom.length ? custom : p.models;
 };
 export const directConfigured = () => DIRECT.filter((p) => keysOf(p).length);
@@ -28,7 +43,7 @@ let turn = 0;
 
 /** يرجع Response من أول مزود ينجح (SSE عند stream) مع {provider, model}، أو يرمي خطأ */
 export async function directChat({ messages, provider = "auto", max_tokens = 4096, temperature, stream = true, prefer, timeout = 30_000 }) {
-  const list = directConfigured().filter((p) => provider === "auto" || provider === p.id);
+  const list = directConfigured().filter((p) => provider === "auto" || provider === p.id || (Array.isArray(provider) && provider.includes(p.id)));
   const errors = [];
   const t = turn++;
   for (const p of list) {
@@ -47,7 +62,7 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
           if (temperature != null) body.temperature = temperature;
           const res = await fetch(p.url, {
             method: "POST",
-            headers: { Authorization: `Bearer ${keys[ki]}`, "Content-Type": "application/json" },
+            headers: { ...(keys[ki] ? { Authorization: `Bearer ${keys[ki]}` } : {}), "Content-Type": "application/json" },
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(timeout),
           });

@@ -29,6 +29,8 @@ async function tg(method, body) {
 const send = (chat_id, text, extra = {}) => tg("sendMessage", { chat_id, text: String(text).slice(0, 4096), disable_web_page_preview: false, ...extra });
 const edit = (chat_id, message_id, text, extra = {}) => tg("editMessageText", { chat_id, message_id, text: String(text).slice(0, 4096), ...extra });
 const action = (chat_id, a) => tg("sendChatAction", { chat_id, action: a });
+// «اسأل شات جي بي تي …» / «بـ ChatGPT …»: الجواب من ChatGPT نفسه
+const GPT_REQ = /^\s*(اسأل|اسال|سأل|خلي|خل|من|ب|بـ|بال|عن طريق|جاوبني\s+ب|جاوب\s+ب)?\s*(شات\s*جي\s*بي\s*تي|شات\s*جبت|شات\s*gpt|chat\s*gpt|gpt)\s*[:،,]?\s*/i;
 // طلب رد صوتي بالكتابة: «دز بصمة»، «رد عليّ ببصمة»، «احچيلي بالصوت»…
 const WANTS_VOICE = /(دز|ارسل|أرسل|سوي|سجل|سجّل|رد|ردلي|جاوب|جاوبني|احچي|احكي|احچيلي|احكيلي|سولف|تكلم|كلمني|اسمعني|سمعني|خليني اسمع|اريد|أريد|ابي|أبي)[^\n]{0,25}(بصم|بالصوت|صوت|فويس|ريكورد|voice)|^\s*(بصم[ةه]|بالصوت|صوتي[ةه]?|فويس|voice)\s*[!؟?.]*\s*$/i;
 // أسئلة «شلون تم بناؤك / أي نموذج / منو سواك»: جواب ثابت بدون أي معلومة ثانية
@@ -99,7 +101,7 @@ async function chatState(chat_id, user_id) {
 }
 
 // ───── القدرات ─────
-async function doChat(chat_id, user, state, text, { voice } = {}) {
+async function doChat(chat_id, user, state, text, { voice, provider = "auto" } = {}) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.tokens >= user.daily_tokens) return send(chat_id, "وصلت حدك اليومي من التوكنات. يتجدد غدًا 🌙");
   await action(chat_id, voice ? "record_voice" : "typing");
@@ -110,7 +112,7 @@ async function doChat(chat_id, user, state, text, { voice } = {}) {
   let answer = "";
   try {
     if (!directConfigured().length) throw new Error("no direct");
-    answer = await directText(messages, { max_tokens: 4096, timeout: 60_000 });
+    answer = await directText(messages, { max_tokens: 4096, timeout: 60_000, provider });
   } catch {
     const r = await gateway("/api/chat", { messages, max_tokens: 4096 });
     const d = await r.json().catch(() => ({}));
@@ -232,7 +234,9 @@ async function handle(update) {
     text = heard.transcript; voice = heard.dialect || "iraqi";
   }
   if (/^\/(start|help)\b/i.test(text)) return send(chat_id, WELCOME);
-  if (ASKS_ABOUT.test(text)) {
+  let provider = "auto";
+  if (GPT_REQ.test(text) && text.replace(GPT_REQ, "").trim().length > 2) { provider = ["chatgpt", "chatgpt-free", "gemini"]; text = text.replace(GPT_REQ, "").trim(); }
+  if (provider === "auto" && ASKS_ABOUT.test(text)) {
     if (voice) { try { return await sendVoice(chat_id, (await speak("تم بنائي بواسطة المبرمج المجهول", voice)).audio, ABOUT); } catch { } }
     return send(chat_id, ABOUT);
   }
@@ -255,7 +259,7 @@ async function handle(update) {
   if (intent.type === "site") return doSite(chat_id, user, state, text, intent.kind, false);
   if (intent.type === "edit") return doSite(chat_id, user, state, text, null, true);
   if (!voice && WANTS_VOICE.test(text)) voice = "iraqi"; // طلب بصمة بالكتابة: نرد بصوت عراقي
-  return doChat(chat_id, user, state, text, { voice });
+  return doChat(chat_id, user, state, text, { voice, provider });
 }
 
 export async function POST(request) {

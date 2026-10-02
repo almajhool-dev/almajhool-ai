@@ -1,0 +1,50 @@
+name: ChatGPT smoke test
+
+# يجرّب ChatGPT المجاني من شبكة حقيقية: نماذج OpenAI عبر GitHub Models + Pollinations بدون مفتاح
+on:
+  push:
+    paths: ["web/api/_direct.js", ".github/workflows/gpt-smoke.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  gpt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: ChatGPT via GitHub Models (OpenAI gpt-4.1 / gpt-4o)
+        env:
+          # مفتاح المستودع المؤقت (للتجربة فقط) — بالموقع نستخدم مفتاح GitHub دائم بصلاحية Models
+          GITHUB_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
+        run: |
+          node --input-type=module -e "
+            import { directChat } from './web/api/_direct.js';
+            const s = Date.now();
+            try {
+              const { res, model } = await directChat({ provider: 'chatgpt', stream: false, max_tokens: 200, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
+              const j = await res.json(); console.log('GH_GPT_OK', model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
+            } catch (e) { console.log('GH_GPT_FAIL', e.message.slice(0, 500)); process.exitCode = 1; }"
+      - name: ChatGPT without any key (Pollinations)
+        continue-on-error: true
+        run: |
+          node --input-type=module -e "
+            import { directChat } from './web/api/_direct.js';
+            const s = Date.now();
+            try {
+              const { res, model } = await directChat({ provider: 'chatgpt-free', stream: false, max_tokens: 200, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
+              const j = await res.json(); console.log('FREE_GPT_OK', model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
+            } catch (e) { console.log('FREE_GPT_FAIL', e.message.slice(0, 500)); process.exitCode = 1; }"
+      - name: Streaming works (site chat uses SSE)
+        continue-on-error: true
+        env:
+          GITHUB_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
+        run: |
+          node --input-type=module -e "
+            import { directChat } from './web/api/_direct.js';
+            const { res, provider, model } = await directChat({ provider: ['chatgpt', 'chatgpt-free'], max_tokens: 60, messages: [{ role: 'user', content: 'قل مرحبا' }] });
+            const t = await res.text(); console.log('STREAM', provider, model, res.headers.get('content-type'), t.split('\n').filter((l) => l.startsWith('data:')).length, 'events');"

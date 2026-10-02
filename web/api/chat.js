@@ -94,6 +94,8 @@ async function ensemble(messages, req) {
     withTimeout(gatewayDraft(messages), 25_000),
     // مسودة ثالثة من Gemini lite (حصة منفصلة) حتى نوفر حصة النموذج الأقوى للجواب النهائي
     withTimeout(directText(messages, { max_tokens: 2048, prefer: ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"] }).then((text) => ({ text, by: "gemini-lite" })), 25_000),
+    // مسودة من ChatGPT (نماذج OpenAI مجانًا)
+    withTimeout(directText(messages, { max_tokens: 2048, provider: ["chatgpt", "chatgpt-free"], timeout: 25_000 }).then((text) => ({ text, by: "chatgpt" })), 28_000),
   ];
   const drafts = (await Promise.allSettled(jobs)).filter((r) => r.status === "fulfilled" && r.value.text?.trim()).map((r) => r.value);
   // نحذف المسودات المكررة من نفس المزود
