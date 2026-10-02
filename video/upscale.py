@@ -22,6 +22,7 @@ SEC_PER_FRAME_360P = 3.6     # قياس فعلي على جهاز GitHub (4 أن�
 PIXELS_360P = 640 * 360
 MAX_WORKERS = 20             # أقصى عدد أجهزة GitHub بنفس الوقت (مستودع عام)
 WORKER_BUDGET = 4.5 * 3600   # وقت المعالجة لكل جهاز (حد GitHub 6 ساعات)
+TARGET_PER_WORKER = 180      # نحاول كل جهاز يخلص جزئه بحدود 3 دقايق
 BOTAPI_IN, BOTAPI_OUT = 20 * 1024 * 1024, 49 * 1024 * 1024
 
 
@@ -147,7 +148,8 @@ def plan_for(info):
         mode = "ffmpeg"                              # المقطع أصلًا عالي الدقة: تحسين وتوضيح بدون تكبير
     mw, mh = even(w * s), even(h * s)
     per_frame = SEC_PER_FRAME_360P * (mw * mh) / PIXELS_360P * 1.15
-    workers = max(1, min(MAX_WORKERS, math.ceil(n / 120)))
+    # نوزع حسب الوقت المتوقع: كل جهاز ياخذ تقريبًا 3 دقايق شغل (أسرع نتيجة)، لحد 20 جهاز
+    workers = max(1, min(MAX_WORKERS, math.ceil(n * per_frame / TARGET_PER_WORKER)))
     if mode == "ai" and n * per_frame / workers > WORKER_BUDGET:   # مقطع طويل كلش: نصغر دخول النموذج حتى يلحگ
         shrink = math.sqrt(WORKER_BUDGET * workers / (n * per_frame))
         mw, mh = even(mw * shrink), even(mh * shrink)
