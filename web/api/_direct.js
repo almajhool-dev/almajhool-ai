@@ -2,36 +2,64 @@
 // تُضاف المفاتيح في أسرار GitHub، والنشر التلقائي يمررها للموقع.
 // كل متغير يقبل عدة مفاتيح مفصولة بفاصلة، وتُجرّب بالتناوب.
 
-export const DIRECT = [
+// كل مصادر الذكاء المجانية بمكان واحد. أي مصدر مفتاحه موجود (أو ما يحتاج مفتاح) يشتغل تلقائيًا،
+// ويشارك بـ«كل النماذج مرة وحدة» (_ensemble.js). أي مصدر جديد يُضاف بسطر هنا، أو بدون كود عن طريق
+// السر EXTRA_PROVIDERS: [{"id":"x","url":"https://host/v1","key":"X_API_KEY","models":["m1","m2"]}]
+const BASE = [
   {
     id: "gemini", label: "Google Gemini", key: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     // كل نموذج إله حصة مجانية منفصلة: إذا واحد وصل حده ننتقل للي بعده
-    models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+    models: ["gemini-flash-latest", "gemini-3.8-flash", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash-lite"],
     // نماذج Gemini «تفكّر» قبل الرد: نخلي التفكير قليل حتى ما يستهلك كل التوكنات ويطلع الرد فارغ
     extra: { reasoning_effort: "low" },
-    minTokens: 1024,
-  },
-  // ChatGPT ونماذج OpenAI مجانًا — كل واحد يحتاج مفتاح مجاني (أي واحد منهم يكفي)
-  {
-    id: "chatgpt", label: "ChatGPT (OpenAI GPT-5.4 nano عبر Pollinations)", key: "POLLINATIONS_API_KEY",
-    url: "https://gen.pollinations.ai/v1/chat/completions",
-    models: ["openai", "openai-fast"],
+    minTokens: 1024, lite: ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"],
   },
   {
-    id: "chatgpt-groq", label: "ChatGPT (OpenAI GPT-OSS 120B عبر Groq)", key: "GROQ_API_KEY",
-    url: "https://api.groq.com/openai/v1/chat/completions",
-    models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
-  },
-  {
-    // OpenRouter: نماذج قوية مجانية (NVIDIA Nemotron Ultra 550B، Qwen 3.8، Google Gemma 4…)
-    id: "openrouter", label: "OpenRouter (Nemotron Ultra 550B وغيره مجانًا)", key: "OPENROUTER_API_KEY",
+    // بالتجربة: Nemotron Ultra يجاوب عراقي ممتاز
+    id: "openrouter", label: "OpenRouter (Nemotron Ultra 550B…)", key: "OPENROUTER_API_KEY",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    // بالتجربة: Nemotron Ultra يجاوب عراقي ممتاز. (openrouter/free يروح أحيانًا لنموذج فلترة بدون جواب، وInkling ممنوع خارج الوكلاء)
     models: ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free", "qwen/qwen3.8-27b:free", "google/gemma-4-31b-it:free"],
+    headers: { "HTTP-Referer": "https://almajhool-ai.vercel.app", "X-Title": "Almajhool AI" }, drafts: 2,
   },
+  { id: "chatgpt", label: "ChatGPT (OpenAI عبر Pollinations)", key: "POLLINATIONS_API_KEY",
+    url: "https://gen.pollinations.ai/v1/chat/completions", models: ["openai", "openai-fast"] },
+  { id: "chatgpt-groq", label: "Groq (OpenAI GPT-OSS 120B)", key: "GROQ_API_KEY",
+    url: "https://api.groq.com/openai/v1/chat/completions", models: ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"] },
+  { id: "cerebras", label: "Cerebras", key: "CEREBRAS_API_KEY",
+    url: "https://api.cerebras.ai/v1/chat/completions", models: ["gpt-oss-120b", "qwen-3-235b-a22b-instruct-2507"] },
+  { id: "nvidia", label: "NVIDIA", key: "NVIDIA_API_KEY",
+    url: "https://integrate.api.nvidia.com/v1/chat/completions", models: ["meta/llama-3.3-70b-instruct", "qwen/qwen3-235b-a22b", "nvidia/llama-3.3-nemotron-super-49b-v1"] },
+  { id: "mistral", label: "Mistral", key: "MISTRAL_API_KEY",
+    url: "https://api.mistral.ai/v1/chat/completions", models: ["mistral-medium-latest", "mistral-small-latest"] },
+  { id: "zai", label: "Z.ai GLM", key: "ZAI_API_KEY",
+    url: "https://api.z.ai/api/paas/v4/chat/completions", models: ["glm-4.7-flash", "glm-4.5-flash"] },
+  { id: "sambanova", label: "SambaNova", key: "SAMBANOVA_API_KEY",
+    url: "https://api.sambanova.ai/v1/chat/completions", models: ["DeepSeek-V3.1", "Meta-Llama-3.3-70B-Instruct", "gpt-oss-120b"] },
+  { id: "cohere", label: "Cohere", key: "COHERE_API_KEY",
+    url: "https://api.cohere.ai/compatibility/v1/chat/completions", models: ["command-a-03-2025", "command-r-plus"] },
+  { id: "huggingface", label: "Hugging Face", key: "HF_TOKEN",
+    url: "https://router.huggingface.co/v1/chat/completions", models: ["openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V3.1", "Qwen/Qwen3-235B-A22B-Instruct-2507"] },
+  { id: "vercel-ai", label: "Vercel AI Gateway", key: "AI_GATEWAY_API_KEY",
+    url: "https://ai-gateway.vercel.sh/v1/chat/completions", models: ["openai/gpt-oss-120b", "deepseek/deepseek-v3.1"] },
+  // بدون أي مفتاح (حدود أقل) — تشارك بالأجوبة حتى لو ما ضفت ولا مفتاح
+  { id: "kilo", label: "Kilo (بدون مفتاح)", key: "KILO_API_KEY", keyless: true,
+    url: "https://api.kilo.ai/api/gateway/chat/completions", models: ["nvidia/nemotron-3-ultra-550b-a55b:free", "qwen/qwen3.8-27b:free", "poolside/laguna-s-2.1:free"] },
+  { id: "llm7", label: "LLM7 (بدون مفتاح)", key: "LLM7_API_KEY", keyless: true,
+    url: "https://api.llm7.io/v1/chat/completions", models: ["GLM-5.3-Flash"] },
+  { id: "ovh", label: "OVH (بدون مفتاح)", key: "OVH_API_KEY", keyless: true,
+    url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", models: ["gpt-oss-120b", "Qwen3.5-397B-A17B", "Meta-Llama-3_3-70B-Instruct"] },
 ];
 
+function extraProviders() {
+  try {
+    const list = JSON.parse(process.env.EXTRA_PROVIDERS || "[]");
+    return (Array.isArray(list) ? list : []).filter((x) => x?.id && x?.url && Array.isArray(x.models) && x.models.length)
+      .filter((x) => !BASE.some((p) => p.id === x.id))
+      .map((x) => ({ ...x, label: x.label || x.id, url: /\/chat\/completions$/.test(x.url) ? x.url : x.url.replace(/\/$/, "") + "/chat/completions", key: x.key || `${String(x.id).toUpperCase()}_API_KEY` }));
+  } catch { return []; }
+}
+export const DIRECT = [...BASE, ...extraProviders()];
 export const GPT_IDS = ["chatgpt", "chatgpt-groq"];
 
 const keysOf = (p) => {
@@ -70,7 +98,7 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
           if (temperature != null) body.temperature = temperature;
           const res = await fetch(p.url, {
             method: "POST",
-            headers: { ...(keys[ki] ? { Authorization: `Bearer ${keys[ki]}` } : {}), "Content-Type": "application/json" },
+            headers: { ...(keys[ki] ? { Authorization: `Bearer ${keys[ki]}` } : {}), ...(p.headers || {}), "Content-Type": "application/json" },
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(timeout),
           });

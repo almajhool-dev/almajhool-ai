@@ -1,0 +1,48 @@
+name: All models together smoke test
+
+# يجرّب «كل النماذج مرة وحدة» من شبكة حقيقية: كل مصدر يجاوب، وبعدها جواب واحد نهائي
+on:
+  push:
+    paths: ["web/api/_direct.js", "web/api/_ensemble.js", ".github/workflows/ensemble-smoke.yml"]
+  workflow_dispatch:
+
+jobs:
+  ensemble:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://unused:unused@localhost/unused
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      EXTRA_PROVIDERS: ${{ secrets.EXTRA_PROVIDERS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Every connected model answers, then one final answer
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { collectDrafts, ensembleAnswer, ensembleSources, synthesisMessages } from './api/_ensemble.js';
+            import { directText } from './api/_direct.js';
+            console.log('SOURCES', ensembleSources().join(', '));
+            const q = [{ role: 'system', content: 'أنت مساعد ذكي، رد بنفس لهجة المستخدم وباختصار.' }, { role: 'user', content: 'شلون أتعلم البرمجة من الصفر وأنا بالعراق؟ جاوب بثلاث نقاط قصيرة باللهجة العراقية' }];
+            const s = Date.now();
+            const all = await collectDrafts(q, { timeout: 22000, enough: 99 });
+            console.log('ALL_DRAFTS (no early finish)', all.map((d) => d.by).join(', '));
+            const s2 = Date.now(); const drafts = await collectDrafts(q, { timeout: 22000 });
+            console.log('EARLY_FINISH', drafts.length, 'drafts in', (Date.now() - s2) + 'ms');
+            console.log('DRAFTS', drafts.length, 'in', (Date.now() - s) + 'ms');
+            for (const d of drafts) console.log('  DRAFT', d.by.padEnd(28), '|', d.text.replace(/\s+/g, ' ').slice(0, 140));
+            const t = Date.now();
+            const final = await directText(synthesisMessages(q, drafts), { max_tokens: 2048, timeout: 60000 });
+            console.log('FINAL', (Date.now() - t) + 'ms', '|', final.replace(/\s+/g, ' ').slice(0, 700));
+            if (drafts.length < 2) process.exitCode = 1;"
