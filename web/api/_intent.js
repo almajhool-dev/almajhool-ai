@@ -11,8 +11,16 @@ export const AR_SITE = [
   ["website", /(موقع|متجر|ستور|store|website|site|بورتفوليو|portfolio|مدون(ة|ه)|صفح(ة|ه) (ويب|شخصي(ة|ه)))/i],
 ];
 // تعديل على الموقع المفتوح: «غيّر اللون»، «ضيف قسم»، «شيل الزر»، «خلي الخط أكبر»…
-export const AR_EDIT = /(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|زيد|زوّد|شيل|احذف|امسح|خلي|خلّي|كبر|كبّر|صغر|صغّر|عدل|عدّل|حسن|حسّن|صلح|صلّح|رتب|رتّب|حرك|حرّك|ترجم الموقع|change|add|remove|make it|fix)/i;
-export const AR_NEW = /(موقع جديد|مشروع جديد|تطبيق جديد|لعبة جديدة|من جديد|new site|new project)/i;
+export const AR_EDIT_WORD = /^(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|زيد|زيّد|زوّد|زود|شيل|احذف|امسح|خلي|خلّي|كبر|كبّر|صغر|صغّر|عدل|عدّل|حسن|حسّن|صلح|صلّح|رتب|رتّب|حرك|حرّك|change|add|remove|fix|make)(ه|ها|هم|لي|يلي|يها|يه)?$/i;
+const AR_EDIT = /(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|زيد|زوّد|شيل|احذف|امسح|خلي|خلّي|كبر|كبّر|صغر|صغّر|عدل|عدّل|حسن|حسّن|صلح|صلّح|رتب|رتّب|حرك|حرّك|ترجم الموقع|change|add|remove|make it|fix)/i;
+export const isEditRequest = (t) => {
+  // فعل التعديل لازم يكون أول كلمة (أو بعد كلمة مثل «ممكن/بعد/هسه/رجاءً»)، والسؤال («منو حسن…») مو تعديل
+  const words = String(t).trim().split(/\s+/).slice(0, 2).map((w) => w.replace(/^(و|ف)(?=..)/, "").replace(/[،,.!؟?]+$/, ""));
+  if (/^(منو|مين|شنو|شو|وين|متى|شكد|كم|ليش|شلون|كيف|هل)$/.test(words[0] || "")) return false;
+  if (AR_EDIT_WORD.test(words[0] || "")) return true;
+  return /^(ممكن|بعد|هسه|هسة|رجاء|رجاءً|لطفا|لطفاً|اريد|أريد|ابي|أبي|please|pls)$/i.test(words[0] || "") && AR_EDIT_WORD.test((words[1] || "").replace(/^[تي](?=...)/, ""));
+};
+const AR_NEW = /(موقع جديد|مشروع جديد|تطبيق جديد|لعبة جديدة|من جديد|new site|new project)/i;
 export const LOVABLE = /lovable|ل[وا]?ف[يا]?ب[ي]?ل/i;
 
 export const stripLovable = (request) => String(request).replace(/\s*(?:ب|بـ|بل|بال|ب ال|على|علئ|عن طريق|من|في|ب منصة|بمنصة)?\s*(?:منص[ةه]\s*)?(?:lovable|ل[وا]?ف[يا]?ب[ي]?ل)/gi, " ").trim();
@@ -39,6 +47,7 @@ export function detectIntent(text, hasProject = false) {
   }
   if (AR_DRAW.test(t) || (AR_WANT.test(t) && AR_IMG.test(t))) return { type: "image" };
   if (AR_WANT.test(t) || AR_NEW.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) return { type: "site", kind };
-  if (hasProject && AR_EDIT.test(t)) return { type: "edit" };
+  // تعديل الموقع: فعل التعديل لازم يكون كلمة مستقلة بأول الكلام (مو جزء من اسم مثل «الزيدي» ← «زيد»)
+  if (hasProject && isEditRequest(t)) return { type: "edit" };
   return { type: "chat" };
 }
