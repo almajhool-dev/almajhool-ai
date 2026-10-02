@@ -63,6 +63,10 @@ jobs:
             catch (e) { console.log('SEARCH_FAIL', e.message.slice(0, 400)); process.exitCode = 1; }
             s = Date.now();
             const sys = { role: 'system', content: 'أنت مساعد ذكي، رد بنفس لهجة المستخدم وباختصار. الدقة أهم شي.' };
-            try { const r = await ensembleAnswer([sys, { role: 'user', content: 'رأيس وزراء لعراق لحالي علي الزيدي' }]); console.log('ENSEMBLE', (Date.now() - s) + 'ms', r.drafts.map((d) => d.by).join(', '), '|', r.text.replace(/\s+/g, ' ').slice(0, 500)); }
-            catch (e) { console.log('ENSEMBLE_FAIL', e.message.slice(0, 300)); }"
+            for (const q of ['رأيس وزراء لعراق لحالي علي الزيدي', 'منو رئيس وزراء العراق هسه؟', 'رئيس وزراء العراق الحالي محمد شياع السوداني صح؟']) {
+              s = Date.now();
+              try { const r = await ensembleAnswer([sys, { role: 'user', content: q }]); const ok = /الزيدي/.test(r.text) && !/(هو|الحالي)[^.]{0,40}السوداني/.test(r.text);
+                    console.log(ok ? 'FACT_OK' : 'FACT_WRONG', (Date.now() - s) + 'ms', r.drafts.map((d) => d.by).join(', '), '|', q, '=>', r.text.replace(/\s+/g, ' ').slice(0, 300)); if (!ok) process.exitCode = 1; }
+              catch (e) { console.log('ENSEMBLE_FAIL', e.message.slice(0, 300)); process.exitCode = 1; }
+            }"
 

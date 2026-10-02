@@ -67,6 +67,15 @@ export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1
 /** رسائل الجواب النهائي: سؤال المستخدم + أجوبة النماذج */
 export function synthesisMessages(messages, drafts) {
   const last = messages[messages.length - 1];
+  // سؤال حقائق وعندنا نتيجة بحث اليوم: الجواب يُبنى على البحث بس (معلومات النماذج الثانية قديمة وتخربط)
+  const search = drafts.find((d) => d.search);
+  if (search) {
+    const today = new Date().toISOString().slice(0, 10);
+    return [
+      ...messages.slice(0, -1),
+      { role: "user", content: `${typeof last.content === "string" ? last.content : JSON.stringify(last.content)}\n\n---\n(ملاحظة داخلية للمساعد: هذا جواب مبني على بحث بالإنترنت اليوم ${today} بأحدث الأخبار والمصادر. معلوماتك أنت ممكن تكون قديمة، فلا تعتمد عليها أبدًا بالأسماء والمناصب والتواريخ والأرقام. اكتب جوابك النهائي اعتمادًا على هذا الجواب حرفيًا للحقائق: لا تغيّر أي اسم أو تاريخ أو رقم، ولا تضيف أي معلومة تخالفه. بس رتّب الكلام بنفس أسلوبك ولهجتي. لا تذكر إنك بحثت أو إن اكو جواب جاهز.)\n\n### جواب البحث\n${search.text.slice(0, 6000)}` },
+    ];
+  }
   const today = new Date().toISOString().slice(0, 10);
   const candidates = drafts.map((d, i) => d.search
     ? `### معلومات من بحث Google اليوم (${today}) — الأحدث والأصح للأسماء والتواريخ والأحداث والأرقام\n${d.text.slice(0, 6000)}`
@@ -85,7 +94,7 @@ export function synthesisMessages(messages, drafts) {
  */
 export async function ensembleAnswer(messages, { stream = false, max_tokens = 4096, temperature, draftTimeout = 22_000, minDrafts = 2 } = {}) {
   const drafts = await collectDrafts(messages, { timeout: draftTimeout });
-  if (drafts.length < minDrafts) throw new Error(`ensemble: only ${drafts.length} drafts`);
+  if (drafts.length < minDrafts && !drafts.some((d) => d.search)) throw new Error(`ensemble: only ${drafts.length} drafts`);
   const synth = synthesisMessages(messages, drafts);
   const draftTokens = drafts.reduce((n, d) => n + estTokens(d.text), 0);
   const names = drafts.map((d) => d.by.split("/")[0]).join(" + ");
