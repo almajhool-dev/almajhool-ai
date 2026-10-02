@@ -1,0 +1,108 @@
+name: Video upscale (Telegram bot)
+
+# رفع دقة المقاطع اللي تنرسل للبوت — بالذكاء الاصطناعي (Real-ESRGAN) على أجهزة GitHub المجانية.
+# البوت يحط المقطع بالطابور، وهذا يشتغل: فورًا (إذا GH_DISPATCH_TOKEN موجود) أو كل 5 دقايق بالجدولة.
+# المقطع ينقسم على لحد 20 جهاز بنفس الوقت، وبعدها يتجمع ويرجع للمستخدم بنفس المحادثة.
+on:
+  repository_dispatch:
+    types: [upscale]
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: ["video/**", ".github/workflows/upscale.yml"]
+
+env:
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+  TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+  # تجربة على فرع غير main: مقطع تجريبي بدون تلكرام
+  TEST_VIDEO_URL: ${{ github.event_name == 'push' && 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4' || '' }}
+  WORK_DIR: work
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      has_job: ${{ steps.prep.outputs.has_job }}
+      segments: ${{ steps.prep.outputs.segments }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Anything in the queue?
+        id: peek
+        run: |
+          if [ -z "$TEST_VIDEO_URL" ] && [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          python video/upscale.py claim
+      - name: Tools
+        if: steps.peek.outputs.go == 'true'
+        run: |
+          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
+          pip -q install telethon
+      - name: Claim, download and split
+        id: prep
+        if: steps.peek.outputs.go == 'true'
+        run: python video/upscale.py prepare
+      - uses: actions/upload-artifact@v4
+        if: steps.prep.outputs.has_job == 'true'
+        with: { name: src, path: "work/src.mkv\nwork/job.json", retention-days: 1, compression-level: 0 }
+
+  process:
+    needs: prepare
+    if: needs.prepare.outputs.has_job == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: true
+      max-parallel: 20
+      matrix:
+        seg: ${{ fromJSON(needs.prepare.outputs.segments) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with: { path: models, key: realesr-general-x4v3 }
+      - uses: actions/cache@v4
+        with: { path: ~/.cache/pip, key: pip-torch-cpu-v1 }
+      - name: Tools
+        run: |
+          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
+          pip -q install torch --index-url https://download.pytorch.org/whl/cpu && pip -q install numpy
+      - uses: actions/download-artifact@v4
+        with: { name: src, path: work }
+      - name: Upscale my part
+        run: python video/upscale.py process ${{ matrix.seg }}
+      - uses: actions/upload-artifact@v4
+        with: { name: "seg-${{ matrix.seg }}", path: "work/seg_*.mp4", retention-days: 1, compression-level: 0 }
+
+  merge:
+    permissions:
+      contents: write
+    needs: [prepare, process]
+    if: always() && needs.prepare.outputs.has_job == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
+          pip -q install telethon
+      - uses: actions/download-artifact@v4
+        with: { path: work }
+      - name: Join, add the sound and send to the user
+        if: needs.process.result == 'success'
+        run: |
+          cp work/src/src.mkv work/src/job.json work/
+          python video/upscale.py merge
+      - uses: actions/upload-artifact@v4
+        if: env.TEST_VIDEO_URL != '' && needs.process.result == 'success'
+        with: { name: result, path: "work/out*.mp4", retention-days: 3 }
+      - name: Test only — result size (and remove the old preview branch)
+        if: env.TEST_VIDEO_URL != '' && needs.process.result == 'success'
+        run: |
+          OUT=$(ls work/out*.mp4 | tail -1); ffprobe -v error -show_entries stream=width,height:format=duration,size -of compact "$OUT"
+          git push -q origin --delete ci-preview-video 2>/dev/null || true
+      - name: Tell the user if something failed
+        if: needs.process.result != 'success'
+        run: |
+          cp work/src/job.json work/ 2>/dev/null || true
+          python video/upscale.py fail "processing failed"
