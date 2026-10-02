@@ -34,6 +34,12 @@ def sh(cmd, **kw):
     return subprocess.run(cmd, check=True, **kw)
 
 
+def download(url, path):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36"})
+    with urllib.request.urlopen(req, timeout=600) as r, open(path, "wb") as f:
+        shutil.copyfileobj(r, f, 1024 * 1024)
+
+
 def even(x):
     return max(2, int(round(x / 2)) * 2)
 
@@ -188,7 +194,7 @@ def model():
     path = os.path.join(os.environ.get("MODEL_DIR", "models"), "realesr-general-x4v3.pth")
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        urllib.request.urlretrieve(MODEL_URL, path)
+        download(MODEL_URL, path)
     m = SRVGGNetCompact()
     sd = torch.load(path, map_location="cpu")
     m.load_state_dict(sd.get("params", sd))
@@ -214,7 +220,7 @@ def stage_prepare(test_url=None):
     os.makedirs(WORK, exist_ok=True)
     if test_url:
         job = {"id": "test", "test": True}
-        urllib.request.urlretrieve(test_url, os.path.join(WORK, "in.mp4"))
+        download(test_url, os.path.join(WORK, "in.mp4"))
     else:
         with open(os.path.join(WORK, "job.json")) as f:   # stage_claim حفظه
             job = json.load(f)
@@ -229,7 +235,7 @@ def stage_prepare(test_url=None):
             f = bot_api("getFile", {"file_id": job["file_id"]})
             if not f.get("ok"):
                 raise UserError("ما گدرت أنزل المقطع من تلكرام (ممكن حجمه أكبر من 20 ميگا).")
-            urllib.request.urlretrieve(f"https://api.telegram.org/file/bot{BOT}/{f['result']['file_path']}", raw)
+            download(f"https://api.telegram.org/file/bot{BOT}/{f['result']['file_path']}", raw)
     info0 = probe(os.path.join(WORK, "in.mp4"))
     fps = round(info0["fps"], 3)
     # نوحّد المقطع: معدل إطارات ثابت + إطار مفتاحي كل ثانية حتى كل جهاز يقص جزئه بالضبط
