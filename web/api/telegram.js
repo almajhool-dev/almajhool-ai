@@ -218,8 +218,9 @@ async function queueVideo(msg, video) {
   const limit = Number(process.env.DAILY_VIDEOS) || 10;
   if (user.role !== "admin" && n >= limit) return send(chat_id, `وصلت حدك اليومي (${limit} مقاطع). يتجدد غدًا 🌙`);
   const [{ q }] = await sql`SELECT count(*)::int AS q FROM video_jobs WHERE status IN ('pending', 'processing')`;
-  const mins = Math.max(2, Math.round(((video.duration || 30) / 60) * 6));
-  const status = await send(chat_id, `🎬 استلمت المقطع وراح أرفع دقته بالذكاء الاصطناعي وأدزه إلك أول ما يخلص.\n⏳ الوقت المتوقع تقريبًا ${mins}–${mins * 2} دقيقة${q ? ` (قبله ${q} بالطابور)` : ""}. تگدر تكمل شغلك بالبوت عادي.`);
+  const mins = Math.max(4, Math.round(4 + ((video.duration || 30) / 60) * 3));
+  const instant = !!process.env.GH_DISPATCH_TOKEN;
+  const status = await send(chat_id, `🎬 استلمت المقطع وراح أرفع دقته بالذكاء الاصطناعي وأدزه إلك أول ما يخلص.\n⏳ الوقت المتوقع تقريبًا ${instant ? mins : mins + 5}–${instant ? mins * 2 : mins * 2 + 10} دقيقة${q ? ` (قبله ${q} بالطابور)` : ""}. راح أحدّثك هنا بكل مرحلة، وتگدر تكمل شغلك بالبوت عادي.`);
   await sql`INSERT INTO video_jobs (id, user_id, chat_id, message_id, file_id, file_size, duration, width, height, status_message_id)
     VALUES (${randomId(8)}, ${user.id}, ${chat_id}, ${msg.message_id}, ${video.file_id}, ${video.file_size || null}, ${video.duration || null},
             ${video.width || null}, ${video.height || null}, ${status?.message_id || null})`;
