@@ -236,7 +236,17 @@ const WELCOME = `أهلًا وسهلًا بيك بـ «المبرمج المجه
 🎬 دز مقطع فيديو وأرفع دقته وأرجعه إلك
 💬 أو اسألني أي سؤال`;
 
+// بصمة: علامة «يسجل بصمة…» تبقى ظاهرة طول ما نشتغل (تلكرام يشيلها بعد 5 ثواني)، حتى المستخدم يعرف إن الرد جاي
 async function handle(update) {
+  const msg = update.message;
+  const chat_id = msg?.chat?.id;
+  if (!chat_id || msg.chat.type !== "private" || !(msg.voice || msg.audio || msg.video_note) || msg.text || msg.caption) return handleMessage(update);
+  action(chat_id, "record_voice").catch(() => {});
+  const tick = setInterval(() => action(chat_id, "record_voice").catch(() => {}), 4500);
+  try { return await handleMessage(update); } finally { clearInterval(tick); }
+}
+
+async function handleMessage(update) {
   const msg = update.message;
   if (!msg?.from || msg.from.is_bot) return;
   const chat_id = msg.chat.id;

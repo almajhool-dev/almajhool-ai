@@ -36,9 +36,8 @@ jobs:
           python video/upscale.py claim
       - name: Tools
         if: steps.peek.outputs.go == 'true'
-        run: |
-          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
-          pip -q install telethon
+        timeout-minutes: 12
+        run: bash video/tools.sh
       - name: Claim, download and split
         id: prep
         if: steps.peek.outputs.go == 'true'
@@ -64,9 +63,8 @@ jobs:
       - uses: actions/cache@v4
         with: { path: ~/.cache/pip, key: pip-torch-cpu-v1 }
       - name: Tools
-        run: |
-          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
-          pip -q install torch --index-url https://download.pytorch.org/whl/cpu && pip -q install numpy
+        timeout-minutes: 15
+        run: bash video/tools.sh torch
       - uses: actions/download-artifact@v4
         with: { name: src, path: work }
       - name: Upscale my part
@@ -84,9 +82,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Tools
-        run: |
-          sudo apt-get -qq update > /dev/null && sudo apt-get -qq install -y ffmpeg > /dev/null
-          pip -q install telethon
+        timeout-minutes: 12
+        run: bash video/tools.sh
       - uses: actions/download-artifact@v4
         with: { path: work }
       - name: Join, add the sound and send to the user

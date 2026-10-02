@@ -18,45 +18,50 @@ export async function transcribe(audio, mime = "audio/ogg") {
   const prompt = `Listen to this voice message. Return ONLY JSON: {"transcript": "...", "dialect": "..."}
 - transcript: exactly what the speaker said, in the original language and dialect, written in its own script (Arabic dialects in Arabic letters, keep dialect words as spoken, do not translate or correct to MSA).
 - dialect: one of iraqi, gulf, saudi, egyptian, levantine, maghrebi, sudanese, yemeni, msa, english, other.`;
+  const data = Buffer.from(audio).toString("base64");
   const errors = [];
-  let waited = false;
-  for (let pass = 0; pass < 2; pass++) for (const model of LISTEN_MODELS()) {
-    if (gone.has(model)) continue;
-    for (const key of GEMINI_KEYS()) {
-      try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: "POST",
-          headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ inline_data: { mime_type: mime, data: Buffer.from(audio).toString("base64") } }, { text: prompt }] }],
-            generationConfig: { temperature: 0, responseMimeType: "application/json" },
-          }),
-          signal: AbortSignal.timeout(60_000),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          errors.push(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 120)}`);
-          if (r.status === 404) gone.add(model);
-          // حد الدقيقة: ننتظر مرة وحدة شوية ونكمل (بالجولة الثانية نرجع نجرب)
-          if (r.status === 429 && !waited && pass === 0) {
-            const delay = Number(String(JSON.stringify(j)).match(/"retryDelay":"(\d+)/)?.[1] || 8);
-            if (delay <= 20) { waited = true; await sleep(delay * 1000); }
-          }
-          continue;
-        }
-        const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-        let out = {};
-        try { out = JSON.parse((text.match(/\{[\s\S]*\}/) || ["{}"])[0]); }
-        catch { // أحيانًا يرجع JSON مكسور: نطلع النص بنفسنا، وإذا بيه رموز \u مكسورة نجرب نموذج ثاني
-          const m = text.match(/"transcript"\s*:\s*"([^"]*)"/);
-          out = { transcript: m ? m[1] : text, dialect: text.match(/"dialect"\s*:\s*"(\w+)"/)?.[1] };
-          if (/\\u0?6?\\|\\u0\b|^\s*\{/.test(out.transcript)) { errors.push(`${model}: bad json`); continue; }
-        }
-        const transcript = String(out.transcript || "").trim();
-        if (transcript) return { transcript, dialect: String(out.dialect || "other").toLowerCase() };
-        errors.push(`${model}: empty`);
-      } catch (e) { errors.push(`${model}: ${e.message}`); }
+  let retryDelay = 0;
+  // محاولة وحدة: نموذج + مفتاح، بوقت محدود (أحيانًا نموذج يعلگ دقيقة كاملة)
+  const once = async (model, key, ms) => {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ inline_data: { mime_type: mime, data } }, { text: prompt }] }],
+        generationConfig: { temperature: 0, responseMimeType: "application/json" },
+      }),
+      signal: AbortSignal.timeout(ms),
+    }).catch((e) => { throw new Error(`${model}: ${e.name === "TimeoutError" ? "timeout" : e.message}`); });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (r.status === 404) gone.add(model);
+      if (r.status === 429) retryDelay = Math.max(retryDelay, Number(String(JSON.stringify(j)).match(/"retryDelay":"(\d+)/)?.[1] || 8));
+      throw new Error(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 120)}`);
     }
+    const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+    let out = {};
+    try { out = JSON.parse((text.match(/\{[\s\S]*\}/) || ["{}"])[0]); }
+    catch { // أحيانًا يرجع JSON مكسور: نطلع النص بنفسنا، وإذا بيه رموز \u مكسورة نجرب نموذج ثاني
+      const m = text.match(/"transcript"\s*:\s*"([^"]*)"/);
+      out = { transcript: m ? m[1] : text, dialect: text.match(/"dialect"\s*:\s*"(\w+)"/)?.[1] };
+      if (/\\u0?6?\\|\\u0\b|^\s*\{/.test(out.transcript)) throw new Error(`${model}: bad json`);
+    }
+    // أحيانًا النموذج يرجع الحروف كرموز \u0623… بدل العربي: نرجعها حروف
+    const transcript = String(out.transcript || "").replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).trim();
+    if (!transcript) throw new Error(`${model}: empty`);
+    return { transcript, dialect: String(out.dialect || "other").toLowerCase() };
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    const tries = LISTEN_MODELS().filter((m) => !gone.has(m)).flatMap((m) => GEMINI_KEYS().map((k) => [m, k]));
+    // أول نموذجين يسمعون بنفس الوقت وناخذ الأسرع، وبعدها الباقي واحد واحد
+    try { return await Promise.any(tries.slice(0, 2).map(([m, k]) => once(m, k, 25_000))); }
+    catch (e) { errors.push(...(e.errors || [e]).map((x) => x.message)); }
+    for (const [m, k] of tries.slice(2)) {
+      try { return await once(m, k, 25_000); } catch (e) { errors.push(e.message); }
+    }
+    // كلهم وصلوا حد الدقيقة: ننتظر مرة وحدة شوية ونعيد
+    if (!retryDelay || retryDelay > 20) break;
+    await sleep(retryDelay * 1000); retryDelay = 0;
   }
   throw new Error("ما گدرت أسمع البصمة: " + errors.slice(0, 6).join(" | "));
 }
