@@ -15,8 +15,9 @@ export const AR_EDIT = /(غير|غيّر|بدل|بدّل|ضيف|أضف|اضف|ز
 export const AR_NEW = /(موقع جديد|مشروع جديد|تطبيق جديد|لعبة جديدة|من جديد|new site|new project)/i;
 export const LOVABLE = /lovable|ل[وا]?ف[يا]?ب[ي]?ل/i;
 
+export const stripLovable = (request) => String(request).replace(/\s*(?:ب|بـ|بل|بال|ب ال|على|علئ|عن طريق|من|في|ب منصة|بمنصة)?\s*(?:منص[ةه]\s*)?(?:lovable|ل[وا]?ف[يا]?ب[ي]?ل)/gi, " ").trim();
 export function lovableUrl(request) {
-  const req = String(request).replace(/\s*(?:ب|بـ|بل|بال|ب ال|على|علئ|عن طريق|من|في|ب منصة|بمنصة)?\s*(?:منص[ةه]\s*)?(?:lovable|ل[وا]?ف[يا]?ب[ي]?ل)/gi, " ").trim();
+  const req = stripLovable(request);
   const prompt = `${req}\n\nBuild this as a complete, beautiful, responsive website. All visible text must be in Arabic with a right-to-left (RTL) layout and a good Arabic font (e.g. Cairo or Tajawal). Fill every section with realistic content (no lorem ipsum).`;
   return `https://lovable.dev/?autosubmit=true#prompt=${encodeURIComponent(prompt.slice(0, 20000))}`;
 }
