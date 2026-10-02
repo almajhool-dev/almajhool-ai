@@ -43,8 +43,13 @@ export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1
     const hard = setTimeout(resolve, Math.max(timeout + 3500, searchJob ? 29_000 : 0));
     const finish = () => { clearTimeout(hard); clearTimeout(graceTimer); resolve(); };
     // ما نبدي العد التنازلي إلا بعد ما يرجع البحث (هو الأهم لأسئلة الحقائق)
-    const maybeGrace = () => { if (got.length >= enough && !graceTimer && searchDone) graceTimer = setTimeout(finish, grace); };
-    searchJob?.then(() => {}, () => {}).finally(() => { searchDone = true; maybeGrace(); });
+    // إذا البحث رجع بنتيجة (هو المرجع للحقائق) نكتفي بمسودتين ونستعجل
+    let searchOk = false;
+    const maybeGrace = () => {
+      const need = searchOk ? Math.min(enough, 2) : enough;
+      if (got.length >= need && !graceTimer && searchDone) graceTimer = setTimeout(finish, searchOk ? 2500 : grace);
+    };
+    searchJob?.then(() => { searchOk = true; }, () => {}).finally(() => { searchDone = true; maybeGrace(); });
     for (const j of jobs) {
       j.then((v) => { if (v?.text?.trim()) got.push(v); }, () => {}).finally(() => {
         pending -= 1;
