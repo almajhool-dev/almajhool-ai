@@ -1,6 +1,7 @@
 // الدردشة: يتحقق من الجلسة والحصة، يمرر للبوابة، ويبث الرد (SSE) ويسجّل التوكنات المستهلكة
 import { HttpError, estTokens, gateway, logUsage, requireUser, route, usageToday } from "./_lib.js";
-import { DIRECT, GPT_IDS, directChat, directConfigured, directText } from "./_direct.js";
+import { DIRECT, directChat, directConfigured } from "./_direct.js";
+import { ensembleAnswer } from "./_ensemble.js";
 
 
 export const POST = route(async (request) => {
@@ -17,11 +18,11 @@ export const POST = route(async (request) => {
   const req = { messages, provider: want, temperature: body.temperature,
     max_tokens: Math.min(Number(body.max_tokens) || 4096, 32000), stream: true };
   let upstream = null, provider = null, model = null, directError = null;
-  // 0) وضع «كل النماذج»: نسأل عدة نماذج بالتوازي، وبعدها Gemini يكتب أفضل جواب من مسوداتهم
+  // 0) وضع «كل النماذج»: نسأل كل النماذج المتصلة بالتوازي، وبعدها نموذج قوي يكتب جواب واحد من أفضل ما بمسوداتهم
   let draftTokens = 0;
   if (body.ensemble === true && want === "auto" && directConfigured().length && JSON.stringify(messages).length < 24000) {
     try {
-      const r = await ensemble(messages, req);
+      const r = await ensembleAnswer(messages, { stream: true, max_tokens: req.max_tokens, temperature: req.temperature });
       upstream = r.res; provider = r.provider; model = r.model; draftTokens = r.draftTokens;
     } catch (e) { directError = e.message; }
   }
@@ -78,39 +79,3 @@ export const POST = route(async (request) => {
   });
   return new Response(upstream.body.pipeThrough(counter), { headers });
 });
-
-// ------------------------------------------------------------------ تجميع إجابات عدة نماذج
-const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
-async function gatewayDraft(messages) {
-  const r = await gateway("/api/chat", { messages, provider: "auto", max_tokens: 2048, stream: false });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.text) throw new Error(d.error || `HTTP ${r.status}`);
-  return { text: d.text, by: `${d.provider || "gateway"}/${d.model || ""}` };
-}
-async function ensemble(messages, req) {
-  // مسودات من مصادر مختلفة بالتوازي (البوابة تتناوب بين مزوداتها، فكل طلب يروح لمزود مختلف)
-  const jobs = [
-    withTimeout(gatewayDraft(messages), 25_000),
-    withTimeout(gatewayDraft(messages), 25_000),
-    // مسودة ثالثة من Gemini lite (حصة منفصلة) حتى نوفر حصة النموذج الأقوى للجواب النهائي
-    withTimeout(directText(messages, { max_tokens: 2048, prefer: ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"] }).then((text) => ({ text, by: "gemini-lite" })), 25_000),
-    // مسودة من ChatGPT (نماذج OpenAI مجانًا)
-    withTimeout(directText(messages, { max_tokens: 2048, provider: GPT_IDS, timeout: 25_000 }).then((text) => ({ text, by: "chatgpt" })), 28_000),
-    // مسودة من نماذج OpenRouter المجانية
-    withTimeout(directText(messages, { max_tokens: 2048, provider: "openrouter", timeout: 25_000 }).then((text) => ({ text, by: "openrouter" })), 28_000),
-  ];
-  const drafts = (await Promise.allSettled(jobs)).filter((r) => r.status === "fulfilled" && r.value.text?.trim()).map((r) => r.value);
-  // نحذف المسودات المكررة من نفس المزود
-  const seen = new Set();
-  const unique = drafts.filter((d) => (seen.has(d.by) ? false : seen.add(d.by)));
-  if (unique.length < 2) throw new Error("ensemble: not enough drafts");
-  const last = messages[messages.length - 1];
-  const candidates = unique.map((d, i) => `### الإجابة ${i + 1}\n${d.text.slice(0, 6000)}`).join("\n\n");
-  const synth = [
-    ...messages.slice(0, -1),
-    { role: "user", content: `${last.content}\n\n---\n(ملاحظة داخلية للمساعد: هذي إجابات مقترحة من عدة نماذج ذكاء اصطناعي على رسالتي الأخيرة. اكتب أنت الجواب النهائي الأفضل: خذ أصح وأفضل ما فيها، صحح أي غلط، ولا تذكر إن اكو إجابات أخرى. جاوب بنفس لغتي ولهجتي.)\n\n${candidates}` },
-  ];
-  const { res, model } = await directChat({ ...req, messages: synth, stream: true });
-  return { res, provider: "ensemble", model: `${model} <- ${unique.map((d) => d.by.split("/")[0]).join(" + ")}`,
-    draftTokens: unique.reduce((n, d) => n + estTokens(d.text), 0) };
-}

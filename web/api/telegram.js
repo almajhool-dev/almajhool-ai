@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import { GPT_IDS, directConfigured, directText } from "./_direct.js";
+import { ensembleAnswer } from "./_ensemble.js";
 import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
@@ -112,7 +113,12 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   let answer = "";
   try {
     if (!directConfigured().length) throw new Error("no direct");
-    answer = await directText(messages, { max_tokens: 4096, timeout: 60_000, provider });
+    if (provider === "auto") {
+      // كل النماذج المتصلة تجاوب بنفس اللحظة، وبعدها نطلع جواب واحد قوي منهم
+      try { answer = (await ensembleAnswer(messages, { draftTimeout: voice ? 15_000 : 22_000 })).text; }
+      catch (e) { console.error("ensemble", e.message); }
+    }
+    if (!answer) answer = await directText(messages, { max_tokens: 4096, timeout: 60_000, provider });
   } catch {
     const r = await gateway("/api/chat", { messages, max_tokens: 4096 });
     const d = await r.json().catch(() => ({}));

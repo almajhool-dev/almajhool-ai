@@ -94,6 +94,18 @@ jobs:
       POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # أي مفتاح من هذول تضيفه بأسرار GitHub يشارك تلقائيًا بـ«كل النماذج مرة وحدة»
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+      COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      LLM7_API_KEY: ${{ secrets.LLM7_API_KEY }}
+      OVH_API_KEY: ${{ secrets.OVH_API_KEY }}
+      EXTRA_PROVIDERS: ${{ secrets.EXTRA_PROVIDERS }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
     steps:
@@ -137,9 +149,10 @@ jobs:
           if [ "$ROOT" = "web" ]; then DIR=.; else DIR=web; fi
           cd "$DIR"
           ENVS=()
-          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN BEST_OF TELEGRAM_BOT_TOKEN POLLINATIONS_API_KEY GROQ_API_KEY OPENROUTER_API_KEY; do
+          for K in GEMINI_API_KEY GEMINI_MODELS HF_TOKEN BEST_OF TELEGRAM_BOT_TOKEN POLLINATIONS_API_KEY GROQ_API_KEY OPENROUTER_API_KEY CEREBRAS_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY SAMBANOVA_API_KEY COHERE_API_KEY AI_GATEWAY_API_KEY KILO_API_KEY LLM7_API_KEY OVH_API_KEY; do
             if [ -n "${!K}" ]; then ENVS+=(-e "$K=${!K}"); echo "passing $K to the site"; fi
           done
+          if [ -n "$EXTRA_PROVIDERS" ]; then ENVS+=(-e "EXTRA_PROVIDERS=$EXTRA_PROVIDERS"); echo "passing EXTRA_PROVIDERS to the site"; fi
           npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" "${ENVS[@]}"
       # بوت تلكرام: إذا السر TELEGRAM_BOT_TOKEN موجود نربط البوت بالموقع ونضبط اسمه وأوامره تلقائيًا
       - name: Connect Telegram bot
