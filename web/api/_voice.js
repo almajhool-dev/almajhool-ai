@@ -143,7 +143,8 @@ export async function googleTTS(text, lang = "ar") {
 // ── Gemini TTS: يحچي اللهجة طبيعي مثل البشر (أوضح من الأصوات الجاهزة باللهجات) ──
 const TTS_MODELS = () => {
   const custom = String(process.env.GEMINI_TTS_MODELS || "").split(",").map((x) => x.trim()).filter(Boolean);
-  return custom.length ? custom : ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"];
+  // بالتجربة (نطق ← استماع): 3.1 أكثر نطق عراقي طبيعي («آني، أگدر، كولي»)، و2.5 واضح وسريع
+  return custom.length ? custom : ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts", "gemini-2.5-pro-preview-tts"];
 };
 const TTS_STYLE = {
   iraqi: "Speak in a natural Iraqi Arabic (Baghdadi) accent, like a friendly young Iraqi man chatting with a friend",
