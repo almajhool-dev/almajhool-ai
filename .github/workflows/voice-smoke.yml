@@ -3,7 +3,7 @@ name: Voice smoke test
 # يجرّب البصمات من شبكة حقيقية: نطق عراقي (Edge) ← Gemini يسمعه ويعرف لهجته ← احتياط Google
 on:
   push:
-    paths: ["web/api/_voice.js", ".github/workflows/voice-smoke.yml"]
+    paths: ["web/api/_voice.js", "web/package.json", ".github/workflows/voice-smoke.yml"]
   workflow_dispatch:
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
         continue-on-error: true
         run: |
           curl -fsS -H "x-goog-api-key: $GEMINI_API_KEY" "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" \
-            | jq -r '.models[] | select(.supportedGenerationMethods | index("generateContent")) | .name' | sed 's#models/##' | tr '\n' ' '
+            | jq -r '.models[] | select(.supportedGenerationMethods | index("generateContent")) | .name' | sed 's#models/##' | grep -Ei 'tts|audio|flash|pro' | tr '\n' ' '
       - name: Speak in several dialects (Edge voices)
         working-directory: web
         run: |
@@ -44,6 +44,30 @@ jobs:
               try { const r = await transcribe(fs.readFileSync(d + '.mp3'), 'audio/mpeg'); console.log('HEARD', d, '=>', r.dialect, '|', r.transcript, (Date.now() - s) + 'ms'); }
               catch (e) { console.log('HEAR_FAIL', d, e.message); process.exitCode = 1; }
             }"
+      - name: Which voice is clearest? (speak the bot's real reply, then listen back)
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { edgeTTS, geminiTTS, normalizeForTTS, transcribe } from './api/_voice.js'; import fs from 'fs';
+            const T = 'هلا بيكم وعليكم السلام، آني زين الحمد لله، شلونك شخبارك؟ وشكو ماكو اليوم؟ گلي شنو أگدر أخدمك بيه؟';
+            const variants = {
+              edge_raw: () => edgeTTS(T, 'ar-IQ-BasselNeural'),
+              edge_normalized: () => edgeTTS(normalizeForTTS(T), 'ar-IQ-BasselNeural'),
+              gemini_tts: () => geminiTTS(T, 'iraqi'),
+            };
+            console.log('ORIGINAL   ', T);
+            for (const [name, fn] of Object.entries(variants)) {
+              const s = Date.now();
+              try {
+                const a = await fn(); fs.writeFileSync(name + '.mp3', a);
+                const ms = Date.now() - s;
+                await new Promise((r) => setTimeout(r, 4000));
+                const h = await transcribe(a, 'audio/mpeg');
+                console.log('ROUNDTRIP', name.padEnd(16), a.length + 'B', ms + 'ms', '=>', h.dialect, '|', h.transcript);
+              } catch (e) { console.log('VARIANT_FAIL', name, e.message.slice(0, 400)); }
+            }"
+      - uses: actions/upload-artifact@v4
+        with: { name: voices, path: "web/*.mp3", retention-days: 3 }
       - name: Fallback voice (Google)
         working-directory: web
         continue-on-error: true
