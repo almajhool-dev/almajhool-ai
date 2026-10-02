@@ -29,6 +29,7 @@ jobs:
           done
           curl -sS "https://models.github.ai/catalog/models" -H "Authorization: Bearer $TOKEN" | jq -r '.[].id' 2>/dev/null | grep -i openai | head -20
       - name: ChatGPT via GitHub Models (OpenAI gpt-4.1 / gpt-4o)
+        continue-on-error: true
         env:
           # مفتاح المستودع المؤقت (للتجربة فقط) — بالموقع نستخدم مفتاح GitHub دائم بصلاحية Models
           GITHUB_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
@@ -40,6 +41,15 @@ jobs:
               const { res, model } = await directChat({ provider: 'chatgpt', stream: false, max_tokens: 200, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
               const j = await res.json(); console.log('GH_GPT_OK', model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
             } catch (e) { console.log('GH_GPT_FAIL', e.message.slice(0, 500)); process.exitCode = 1; }"
+      - name: Pollinations endpoints (raw)
+        continue-on-error: true
+        run: |
+          for U in https://text.pollinations.ai/openai https://gen.pollinations.ai/v1/chat/completions https://text.pollinations.ai/v1/chat/completions; do
+            echo "== $U"
+            curl -sS -i -m 60 -X POST "$U" -H "Content-Type: application/json" \
+              -d '{"model":"openai","messages":[{"role":"user","content":"say hi in Iraqi Arabic"}],"max_tokens":40}' | head -c 900; echo
+          done
+          curl -sS -m 30 https://text.pollinations.ai/models | jq -c '[.[] | {name, description, tier}] | .[:15]' 2>/dev/null | head -c 1500
       - name: ChatGPT without any key (Pollinations)
         continue-on-error: true
         run: |
