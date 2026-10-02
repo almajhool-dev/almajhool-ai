@@ -6,6 +6,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@napi-rs/canvas": "^1.0.10",
     "@neondatabase/auth": "0.5.0-beta",
     "@neondatabase/serverless": "^1.0.0",
