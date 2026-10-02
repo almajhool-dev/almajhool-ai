@@ -1,0 +1,45 @@
+name: ChatGPT smoke test
+
+# يجرّب ChatGPT المجاني من شبكة حقيقية بالمفاتيح الموجودة بأسرار المستودع (أي واحد يكفي)
+on:
+  push:
+    paths: ["web/api/_direct.js", ".github/workflows/gpt-smoke.yml"]
+  workflow_dispatch:
+
+jobs:
+  gpt:
+    runs-on: ubuntu-latest
+    env:
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Which ChatGPT keys exist
+        run: |
+          for K in POLLINATIONS_API_KEY GROQ_API_KEY OPENROUTER_API_KEY; do
+            if [ -n "${!K}" ]; then echo "KEY_PRESENT $K"; else echo "KEY_MISSING $K"; fi
+          done
+      - name: Ask ChatGPT (each configured route)
+        run: |
+          node --input-type=module -e "
+            import { GPT_IDS, directChat, directConfigured } from './web/api/_direct.js';
+            const ids = directConfigured().map((p) => p.id).filter((id) => GPT_IDS.includes(id));
+            if (!ids.length) { console.log('NO_GPT_KEY — add one of POLLINATIONS_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY'); process.exit(0); }
+            for (const id of ids) {
+              const s = Date.now();
+              try {
+                const { res, model } = await directChat({ provider: id, stream: false, max_tokens: 300, messages: [{ role: 'user', content: 'جاوب باللهجة العراقية بجملة وحدة: شنو أحسن أكلة عراقية؟' }] });
+                const j = await res.json(); console.log('GPT_OK', id, model, (Date.now() - s) + 'ms', '|', j.choices[0].message.content);
+              } catch (e) { console.log('GPT_FAIL', id, e.message.slice(0, 400)); }
+            }"
+      - name: Non-JSON 200 answers are rejected (no empty replies)
+        run: |
+          node --input-type=module -e "
+            globalThis.fetch = async () => new Response('OK', { status: 200, headers: { 'content-type': 'text/plain' } });
+            process.env.GROQ_API_KEY = 'x';
+            const { directChat } = await import('./web/api/_direct.js');
+            try { await directChat({ provider: 'chatgpt-groq', messages: [{ role: 'user', content: 'hi' }] }); console.log('GUARD_FAIL'); process.exitCode = 1; }
+            catch (e) { console.log('GUARD_OK', e.message); }"

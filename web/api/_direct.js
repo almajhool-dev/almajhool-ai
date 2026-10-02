@@ -12,11 +12,32 @@ export const DIRECT = [
     extra: { reasoning_effort: "low" },
     minTokens: 1024,
   },
+  // ChatGPT ونماذج OpenAI مجانًا — كل واحد يحتاج مفتاح مجاني (أي واحد منهم يكفي)
+  {
+    id: "chatgpt", label: "ChatGPT (OpenAI GPT-5.4 nano عبر Pollinations)", key: "POLLINATIONS_API_KEY",
+    url: "https://gen.pollinations.ai/v1/chat/completions",
+    models: ["openai", "openai-fast"],
+  },
+  {
+    id: "chatgpt-groq", label: "ChatGPT (OpenAI GPT-OSS 120B عبر Groq)", key: "GROQ_API_KEY",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+  },
+  {
+    id: "chatgpt-openrouter", label: "ChatGPT (OpenAI GPT-OSS عبر OpenRouter)", key: "OPENROUTER_API_KEY",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    models: ["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free"],
+  },
 ];
 
-const keysOf = (p) => String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
+export const GPT_IDS = ["chatgpt", "chatgpt-groq", "chatgpt-openrouter"];
+
+const keysOf = (p) => {
+  const keys = String(process.env[p.key] || "").split(/[\s,]+/).filter(Boolean);
+  return keys.length ? keys : p.keyless ? [""] : [];
+};
 const modelsOf = (p) => {
-  const custom = String(process.env[`${p.id.toUpperCase()}_MODELS`] || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const custom = String(process.env[`${p.id.toUpperCase().replace(/-/g, "_")}_MODELS`] || "").split(",").map((s) => s.trim()).filter(Boolean);
   return custom.length ? custom : p.models;
 };
 export const directConfigured = () => DIRECT.filter((p) => keysOf(p).length);
@@ -28,7 +49,7 @@ let turn = 0;
 
 /** يرجع Response من أول مزود ينجح (SSE عند stream) مع {provider, model}، أو يرمي خطأ */
 export async function directChat({ messages, provider = "auto", max_tokens = 4096, temperature, stream = true, prefer, timeout = 30_000 }) {
-  const list = directConfigured().filter((p) => provider === "auto" || provider === p.id);
+  const list = directConfigured().filter((p) => provider === "auto" || provider === p.id || (Array.isArray(provider) && provider.includes(p.id)));
   const errors = [];
   const t = turn++;
   for (const p of list) {
@@ -47,11 +68,14 @@ export async function directChat({ messages, provider = "auto", max_tokens = 409
           if (temperature != null) body.temperature = temperature;
           const res = await fetch(p.url, {
             method: "POST",
-            headers: { Authorization: `Bearer ${keys[ki]}`, "Content-Type": "application/json" },
+            headers: { ...(keys[ki] ? { Authorization: `Bearer ${keys[ki]}` } : {}), "Content-Type": "application/json" },
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(timeout),
           });
-          if (res.ok) return { res, provider: p.id, model };
+          // بعض الخدمات ترجع 200 بنص عادي (مثل «OK») لمن تكون معطلة: نعتبره فشل حتى ما يطلع جواب فارغ
+          const ctype = res.headers.get("content-type") || "";
+          if (res.ok && /json|event-stream/i.test(ctype)) return { res, provider: p.id, model };
+          if (res.ok) { cooldown.set(ck, Date.now() + 600_000); errors.push(`${p.id}/${model}: unexpected ${ctype || "response"}`); continue; }
           const text = (await res.text()).slice(0, 200);
           cooldown.set(ck, Date.now() + (res.status === 429 ? 60_000 : res.status === 404 || res.status === 400 ? 600_000 : 30_000));
           errors.push(`${p.id}/${model}: HTTP ${res.status} ${text}`);
