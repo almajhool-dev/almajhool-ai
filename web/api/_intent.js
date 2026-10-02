@@ -22,9 +22,20 @@ export function lovableUrl(request) {
 }
 
 export function detectIntent(text, hasProject = false) {
-  const t = text.trim();
-  if (t.length > 1500 || AR_ASK.test(t)) return { type: "chat" };
+  const full = text.trim();
+  // الطلبات الطويلة (مواصفات موقع كاملة) نحكم عليها من بدايتها، والسؤال («شلون…») بس بالرسائل القصيرة
+  if (full.length < 300 ? AR_ASK.test(full) : AR_ASK.test(full.slice(0, 60))) return { type: "chat" };
+  const t = full.slice(0, 400);
   if (LOVABLE.test(t) && !AR_DRAW.test(t)) return { type: "lovable" };
+  // «أنشئ لي موقع… (وبعدها شعار وصور…)»: اللي ينذكر أول بالطلب هو اللي يحدد، موقع لو صورة
+  const head = full.slice(0, 150);
+  if (AR_WANT.test(head) && !/(ارسم|إرسم|draw|paint)/i.test(head)) {
+    const firstImg = head.search(AR_IMG);
+    for (const [kind, re] of AR_SITE) {
+      const at = head.search(re);
+      if (at >= 0 && (firstImg < 0 || at < firstImg)) return { type: "site", kind };
+    }
+  }
   if (AR_DRAW.test(t) || (AR_WANT.test(t) && AR_IMG.test(t))) return { type: "image" };
   if (AR_WANT.test(t) || AR_NEW.test(t)) for (const [kind, re] of AR_SITE) if (re.test(t)) return { type: "site", kind };
   if (hasProject && AR_EDIT.test(t)) return { type: "edit" };

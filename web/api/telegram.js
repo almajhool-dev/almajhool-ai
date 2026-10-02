@@ -14,7 +14,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || (TOKEN ? createHash("sha256").update(TOKEN).digest("hex").slice(0, 48) : "");
 const SITE = (process.env.PUBLIC_URL || "https://almajhool-ai.vercel.app").replace(/\/$/, "");
 
-const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت يستطيع أيضًا رسم الصور (مثل: ارسملي…) وبناء ونشر المواقع (مثل: ابنيلي موقع…).";
+const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…). لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
 
 // ───── Telegram API ─────
 async function tg(method, body) {
@@ -28,6 +28,8 @@ async function tg(method, body) {
 const send = (chat_id, text, extra = {}) => tg("sendMessage", { chat_id, text: String(text).slice(0, 4096), disable_web_page_preview: false, ...extra });
 const edit = (chat_id, message_id, text, extra = {}) => tg("editMessageText", { chat_id, message_id, text: String(text).slice(0, 4096), ...extra });
 const action = (chat_id, a) => tg("sendChatAction", { chat_id, action: a });
+// تلكرام يرفض أزرار الروابط الطويلة جدًا (والرسالة كلها تفشل): نقصّر طلب Lovable إذا طال
+const lovableLink = (text) => { const u = lovableUrl(text); return u.length <= 2000 ? u : lovableUrl(String(text).slice(0, 220)); };
 const linkButtons = (rows) => ({ reply_markup: { inline_keyboard: rows.map((r) => r.map(([text, url]) => ({ text, url }))) } });
 
 async function sendPhoto(chat_id, buffer, mime, caption, extra = {}) {
@@ -155,7 +157,7 @@ async function doSite(chat_id, user, state, text, kind, isEdit) {
   const url = `${SITES_ORIGIN || SITE + "/s"}/${slug}`;
   const msg = `${current ? "✅ عدّلت موقعك ونشرت التحديث على نفس الرابط!" : "✅ موقعك جاهز ومنشور!"}\n${url}\n\nاكتب أي تعديل هنا، مثل: «غيّر اللون للأزرق» أو «ضيف قسم آراء العملاء».\nوإذا تريد موقع جديد: /new`;
   if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
-  await send(chat_id, msg, linkButtons([[["↗ افتح الموقع", url]], [["💜 ابنيه بـ Lovable", lovableUrl(text)]]]));
+  await send(chat_id, msg, linkButtons([[["↗ افتح الموقع", url]], [["💜 ابنيه بـ Lovable", lovableLink(text)]]]));
 }
 
 const WELCOME = `أهلًا بيك بالبوت الرسمي لـ «المبرمج المجهول AI» 👋
@@ -192,7 +194,13 @@ async function handle(update) {
   const intent = detectIntent(text, !!state.site_slug);
   if (intent.type === "lovable") {
     return send(chat_id, "💜 جهزت طلبك لمنصة Lovable. اضغط الزر وسجّل دخول بحسابك المجاني، وراح يبدأ يبني الموقع تلقائيًا.\nإذا خلص رصيد Lovable اليومي، اكتب طلبك بدون كلمة لفيبل وأبنيه لك هنا مجانًا.",
-      linkButtons([[["💜 ابنيه بـ Lovable", lovableUrl(text)]]]));
+      linkButtons([[["💜 ابنيه بـ Lovable", lovableLink(text)]]]));
+  }
+  // «نطيني رابط الموقع» بعد ما وصف موقع بالدردشة: نبني آخر طلب موقع كتبه
+  if (intent.type === "chat" && !state.site_slug && /رابط|لينك|link/i.test(text) && /موقع|الموقع|site/i.test(text)) {
+    const prev = (Array.isArray(state.history) ? state.history : []).filter((m) => m.role === "user").reverse()
+      .map((m) => ({ m, i: detectIntent(m.content) })).find((x) => x.i.type === "site");
+    if (prev) return doSite(chat_id, user, state, prev.m.content, prev.i.kind, false);
   }
   if (intent.type === "image") return doImage(chat_id, user, text);
   if (intent.type === "site") return doSite(chat_id, user, state, text, intent.kind, false);
