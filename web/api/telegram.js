@@ -64,8 +64,9 @@ async function sendVoice(chat_id, buffer, caption) {
 }
 
 /** نص طويل يتقسم على عدة رسائل، ونشيل رموز Markdown حتى يطلع نظيف */
+const cleanText = (text) => String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#{1,6}\s*/gm, "").replace(/^\s*[-*]\s+/gm, "• ").trim();
 async function sendLong(chat_id, text) {
-  const clean = String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#{1,6}\s*/gm, "").replace(/^\s*[-*]\s+/gm, "• ").trim() || "…";
+  const clean = cleanText(text) || "…";
   for (let i = 0; i < clean.length; i += 4000) await send(chat_id, clean.slice(i, i + 4000));
 }
 
@@ -119,7 +120,8 @@ async function doChat(chat_id, user, state, text, { voice } = {}) {
     try {
       await action(chat_id, "record_voice");
       const { audio } = await speak(answer, voice);
-      await sendVoice(chat_id, audio, answer.length <= 1000 ? answer : "");
+      const caption = cleanText(answer);
+      await sendVoice(chat_id, audio, caption.length <= 1000 ? caption : "");
       spoken = true;
     } catch (e) { console.error("voice reply", e.message); }
   }
