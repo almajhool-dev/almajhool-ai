@@ -17,6 +17,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - name: Debug GitHub Models endpoint
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.GH_MODELS_TOKEN || github.token }}
+        run: |
+          for U in https://models.github.ai/inference/chat/completions https://models.inference.ai.azure.com/chat/completions; do
+            echo "== $U"
+            curl -sS -i -X POST "$U" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "Accept: application/json" \
+              -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"say hi"}],"max_tokens":20}' | head -c 1200; echo
+          done
+          curl -sS "https://models.github.ai/catalog/models" -H "Authorization: Bearer $TOKEN" | jq -r '.[].id' 2>/dev/null | grep -i openai | head -20
       - name: ChatGPT via GitHub Models (OpenAI gpt-4.1 / gpt-4o)
         env:
           # مفتاح المستودع المؤقت (للتجربة فقط) — بالموقع نستخدم مفتاح GitHub دائم بصلاحية Models
