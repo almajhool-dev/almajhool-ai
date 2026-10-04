@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { GlobalFonts, createCanvas } from "@napi-rs/canvas";
 import { directText } from "./api/_direct.js";
 import { bestImage, fallbackImage } from "./api/_images.js";
-import { speak } from "./api/_voice.js";
+import { geminiTTS, speak } from "./api/_voice.js";
 import { gradioRun } from "./api/_videogen.js";
 
 const BOT = process.env.TELEGRAM_BOT_TOKEN;
@@ -66,8 +66,9 @@ ${job.prompt ? `(وصف إنكليزي مساعد: ${job.prompt})` : ""}
 رجّع JSON فقط (مختصر، بدون أي شرح):
 {"style_en":"<one visual style for all scenes: e.g. cinematic photorealistic, golden hour, 35mm>",
  "character_en":"<exact look of the main subject(s), repeated in every scene so they look the same>",
- "scenes":[{"visual_en":"<English image prompt for this scene: subject + action + setting + camera framing>","caption_ar":"<نص قصير على الشاشة، 2-5 كلمات>","narration_ar":"<جملة تعليق صوتي باللهجة العراقية، 6-14 كلمة>"}]}
-المشاهد لازم تكمل بعضها كقصة (بداية، تطور، ذروة، نهاية)، وكلها عن الطلب نفسه بالضبط.` }],
+ "scenes":[{"visual_en":"<English image prompt for this scene: subject + action + setting + camera framing>","caption_ar":"<نص قصير على الشاشة، 2-5 كلمات>","narration_ar":"<جملة تعليق صوتي عراقية، 6-14 كلمة>"}]}
+المشاهد لازم تكمل بعضها كقصة (بداية، تطور، ذروة، نهاية)، وكلها عن الطلب نفسه بالضبط.
+التعليق الصوتي: لهجة بغدادية دارجة طبيعية مثل يوتيوبر عراقي يحچي ويا جمهوره (مثل: «شوفوا هالأسد شلون يركض…»، «وهسه لاحظوا…»)، كلمات يومية واضحة ومعروفة، بدون فصحى ثقيلة وبدون كلمات غريبة أو مخترعة، والجمل قصيرة وتنقرى بسهولة.` }],
   { provider: "gemini", max_tokens: 4000, timeout: 60_000 });
   const j = parseJson(out);
   const scenes = (j.scenes || []).filter((s) => s?.visual_en).slice(0, 5);
@@ -113,26 +114,83 @@ function captionPng(text, file) {
   fs.writeFileSync(file, c.toBuffer("image/png"));
 }
 
+// تدقيق التعليق: عراقي طبيعي 100%، بدون كلمات غريبة أو غلط
+async function polishNarration(lines) {
+  const out = await directText([{ role: "user", content: `هاي جمل تعليق صوتي لمقطع فيديو، كل سطر جملة:
+${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}
+صحّحها حتى تكون لهجة عراقية بغدادية دارجة طبيعية 100% مثل ما يحچي العراقي بحياته اليومية: شيل أي كلمة غريبة أو مخترعة أو غلط أو فصحى ثقيلة وبدلها بكلمة عراقية معروفة، وخلي المعنى نفسه والطول تقريبًا نفسه.
+رجّع JSON فقط: {"lines":["...","..."]} بنفس العدد والترتيب.` }], { provider: "gemini", max_tokens: 1500, timeout: 40_000 });
+  const j = parseJson(out);
+  return Array.isArray(j.lines) && j.lines.length === lines.length ? j.lines.map((l, i) => String(l || lines[i]).trim()) : lines;
+}
+
+// تسجيل واحد لكل التعليق بالصوت العراقي الواضح (Gemini). إذا الحصة مشغولة ننتظر ونعيد بدل الصوت الاحتياطي
+async function narrateAll(lines) {
+  const text = lines.filter(Boolean).join("\n\n");
+  for (let a = 0; a < 3; a++) {
+    try { return await geminiTTS(text, "iraqi", { timeout: 150_000 }); }
+    catch (e) { console.log("narration tts", a, String(e.message).slice(0, 160)); if (a < 2) await sleep(a ? 60_000 : 25_000); }
+  }
+  return null;
+}
+
+// نقسم التسجيل على المشاهد: كل حد بين جملتين = أقرب سكتة للمكان المتوقع (حسب طول كل جملة)
+function splitBySilence(file, lines) {
+  const A = dur(file);
+  const log = (() => { try { return execFileSync("ffmpeg", ["-i", file, "-af", "silencedetect=noise=-35dB:d=0.25", "-f", "null", "-"], { stdio: ["ignore", "pipe", "pipe"] }).toString(); } catch (e) { return String(e.stderr || ""); } })();
+  const starts = [...log.matchAll(/silence_start: ([\d.]+)/g)].map((m) => +m[1]);
+  const ends = [...log.matchAll(/silence_end: ([\d.]+)/g)].map((m) => +m[1]);
+  const mids = starts.map((st, i) => (st + (ends[i] ?? st)) / 2).filter((t) => t > 0.4 && t < A - 0.4);
+  const total = lines.reduce((a, l) => a + Math.max(1, l.length), 0);
+  const bounds = [0];
+  let acc = 0;
+  for (let i = 0; i < lines.length - 1; i++) {
+    acc += Math.max(1, lines[i].length);
+    const want = (acc / total) * A;
+    const near = mids.filter((t) => t > bounds[bounds.length - 1] + 1).sort((x, y) => Math.abs(x - want) - Math.abs(y - want))[0];
+    bounds.push(near !== undefined && Math.abs(near - want) < A * 0.2 ? near : Math.max(want, bounds[bounds.length - 1] + 1));
+  }
+  bounds.push(A);
+  return bounds.slice(1).map((b, i) => b - bounds[i]);
+}
+
 async function storyVideo() {
   await loadUserImage().catch((e) => console.log("user image", e.message));
   const sb = await storyboard();
   console.log("STORY", JSON.stringify(sb).slice(0, 600));
-  // الأصوات كلها بنفس الوقت، والصور وحدة ورا وحدة
-  const voiceJobs = sb.scenes.map((s) => s.narration_ar ? speak(s.narration_ar, "iraqi").then((v) => v.audio).catch((e) => (console.log("tts", e.message), null)) : null);
+  // التعليق: تدقيق عراقي ← تسجيل واحد (يشتغل بنفس وقت رسم الصور)
+  const lines0 = sb.scenes.map((s) => String(s.narration_ar || "").trim());
+  const narrationJob = (async () => {
+    const lines = await polishNarration(lines0).catch(() => lines0);
+    console.log("NARRATION", JSON.stringify(lines));
+    const audio = await narrateAll(lines);
+    return { lines, audio };
+  })();
   const images = [];
   for (const [i, s] of sb.scenes.entries()) {
     await say(`🎨 دا أرسم المشهد ${i + 1} من ${sb.scenes.length}…`);
     if (i === 0 && userImage) { images.push(userImage); continue; }
     images.push(await sceneImage(`${s.visual_en}. ${sb.character}. Style: ${sb.style}. No text, no letters, no watermark.`));
   }
+  const { lines, audio: fullVoice } = await narrationJob;
+  // مدة كل مشهد = مدة جملته بالتسجيل (حتى كل جملة تنسمع ويا مشهدها بالضبط)
+  let durs = null, fallbackVoices = [];
+  if (fullVoice) {
+    fs.writeFileSync(`${DIR}/narration.mp3`, fullVoice);
+    const segs = splitBySilence(`${DIR}/narration.mp3`, lines);
+    durs = segs.map((g, i) => (i < segs.length - 1 ? Math.max(2.5, g) + FADE : Math.max(2.5, g) + 1.2));
+    console.log("NARRATION_SPLIT", segs.map((g) => g.toFixed(2)).join(","));
+  } else { // الصوت الواضح مو متوفر اليوم: الصوت الاحتياطي، جملة جملة (وحدة ورا وحدة)
+    for (const l of lines) fallbackVoices.push(l ? await speak(l, "iraqi").then((v) => v.audio).catch(() => null) : null);
+  }
   const parts = await Promise.all(sb.scenes.map(async (s, i) => {
-    const [img, voice] = [images[i], await voiceJobs[i]];
+    const [img, voice] = [images[i], fallbackVoices[i]];
     const imgFile = `${DIR}/s${i}.png`;
     fs.writeFileSync(`${DIR}/s${i}.raw`, Buffer.from(img.split(",")[1], "base64"));
     // المشاهد المرسومة: نقص 5% من الأطراف (يشيل علامة المصدر الصغيرة بالزاوية). صورة المستخدم تبقى كاملة
     const trim = i === 0 && userImage ? "" : "crop=iw*0.9:ih*0.9:iw*0.05:ih*0.05,";
     ff(["-i", `${DIR}/s${i}.raw`, "-vf", `${trim}scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2}`, imgFile]);
-    let voiceFile = null, d = 4;
+    let voiceFile = null, d = durs ? durs[i] : 4;
     if (voice) { voiceFile = `${DIR}/v${i}.mp3`; fs.writeFileSync(voiceFile, voice); d = Math.max(4, dur(voiceFile) + 0.9); }
     captionPng(s.caption_ar || "", `${DIR}/c${i}.png`);
     return { imgFile, voiceFile, d };
@@ -158,12 +216,13 @@ async function storyVideo() {
   const total = parts.reduce((a, p) => a + p.d, 0) - FADE * (parts.length - 1);
   // التعليق الصوتي: كل جملة تبدي ويا مشهدها
   const aIn = [], aChain = [];
+  if (fullVoice) { aIn.push("-i", `${DIR}/narration.mp3`); aChain.push(`[${parts.length}:a]adelay=300:all=1[an]`); }
   let start = 0;
   parts.forEach((p, i) => {
     if (p.voiceFile) { aIn.push("-i", p.voiceFile); const k = parts.length + aIn.length / 2 - 1; aChain.push(`[${k}:a]adelay=${Math.round((start + 0.35) * 1000)}:all=1[a${i}]`); }
     start += p.d - FADE;
   });
-  const voices = aChain.map((s) => s.match(/\[a\d+\]$/)[0]);
+  const voices = aChain.map((s) => s.match(/\[a\w+\]$/)[0]);
   const audio = voices.length ? `;${aChain.join(";")};${voices.join("")}amix=inputs=${voices.length}:normalize=0,apad[aout]` : "";
   const out = "generated.mp4";
   ff([...inputs, ...aIn, "-filter_complex", `${chain.replace(/;$/, "")}${parts.length > 1 ? "" : "[0:v]null[x0]"}${audio}`,
