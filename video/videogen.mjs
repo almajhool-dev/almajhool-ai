@@ -15,6 +15,7 @@ import { gradioRun } from "./api/_videogen.js";
 
 const BOT = process.env.TELEGRAM_BOT_TOKEN;
 const job = JSON.parse(process.env.JOB || "{}") || {};
+if (!job.chat_id && process.env.TEST_IMAGE_URL) job.image_url = process.env.TEST_IMAGE_URL; // تجربة: مقطع من صورة
 const request = job.request || process.env.TEST_PROMPT || "أسد يركض بالصحرا وقت الغروب";
 const W = 1080, H = 1080, FPS = 30, FADE = 0.6;
 const DIR = "vg"; fs.mkdirSync(DIR, { recursive: true });
@@ -43,8 +44,24 @@ async function motionVideo() {
 }
 
 // ── فيلم قصير: قصة ← صور ← حركة + صوت + نص ──
+// صورة دزها المستخدم («سوي مقطع من هاي الصورة»): تصير أول مشهد، والقصة تكمل منها بنفس الشكل
+let userImage = null, imageDesc = "";
+async function loadUserImage() {
+  if (!job.image_url) return;
+  const r = await fetch(job.image_url, { signal: AbortSignal.timeout(30_000) });
+  const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0];
+  if (!r.ok || !ct.startsWith("image/")) { console.log("user image", r.status); return; }
+  userImage = `data:${ct};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
+  imageDesc = String(await directText([{ role: "user", content: [
+    { type: "text", text: "Describe this image precisely in English for an image generator: main subject(s) and their exact look, setting, colors, lighting and visual style. One paragraph." },
+    { type: "image_url", image_url: { url: userImage } },
+  ] }], { provider: "gemini", max_tokens: 400, timeout: 40_000 }).catch(() => ""));
+  console.log("USER_IMAGE", imageDesc.slice(0, 300));
+}
+
 async function storyboard() {
   const out = await directText([{ role: "user", content: `اكتب قصة مقطع فيديو قصير (4 مشاهد ورا بعض) لهذا الطلب: «${request}»
+${userImage ? `المقطع يبدي من صورة المستخدم (المشهد الأول هو الصورة نفسها، وصفها: ${imageDesc}). المشاهد الثانية تكمل القصة بنفس الشخصيات ونفس الستايل بالضبط.` : ""}
 ${job.prompt ? `(وصف إنكليزي مساعد: ${job.prompt})` : ""}
 رجّع JSON فقط:
 {"style_en":"<one visual style for all scenes: e.g. cinematic photorealistic, golden hour, 35mm>",
@@ -94,6 +111,7 @@ function captionPng(text, file) {
 }
 
 async function storyVideo() {
+  await loadUserImage().catch((e) => console.log("user image", e.message));
   const sb = await storyboard();
   console.log("STORY", JSON.stringify(sb).slice(0, 600));
   // الأصوات كلها بنفس الوقت، والصور وحدة ورا وحدة
@@ -101,6 +119,7 @@ async function storyVideo() {
   const images = [];
   for (const [i, s] of sb.scenes.entries()) {
     await say(`🎨 دا أرسم المشهد ${i + 1} من ${sb.scenes.length}…`);
+    if (i === 0 && userImage) { images.push(userImage); continue; }
     images.push(await sceneImage(`${s.visual_en}. ${sb.character}. Style: ${sb.style}. No text, no letters, no watermark.`));
   }
   const parts = await Promise.all(sb.scenes.map(async (s, i) => {

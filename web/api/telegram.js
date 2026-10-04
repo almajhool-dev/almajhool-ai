@@ -10,7 +10,7 @@ import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
-import { editImage, enhanceImage, planImageFollowup, preciseEdit, redrawPrompt, verifyEdit, visionMessages } from "./_imageedit.js";
+import { editImage, enhanceImage, planImageFollowup, preciseEdit, redrawPrompt, routeFollowup, verifyEdit, visionMessages } from "./_imageedit.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
 import { dispatch, ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
@@ -19,7 +19,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || (TOKEN ? createHash("sha256").update(TOKEN).digest("hex").slice(0, 48) : "");
 const SITE = (process.env.PUBLIC_URL || "https://almajhool-ai.vercel.app").replace(/\/$/, "");
 
-const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. الدقة أهم شي: لا تخترع أسماء أو تواريخ أو أرقام، وإذا المستخدم ذكر معلومة لا توافقه عليها إلا إذا متأكد إنها صحيحة، وإذا ما متأكد گول بصراحة. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…)، ويشوف الصور اللي يدزها المستخدم ويعدل عليها. تذكّر كل المحادثة وارجع لها: إذا المستخدم أشار لشي گاله قبل أو لصورة دزها أو رسمناها (مثل «هاي» أو «الصورة» أو «نفس الشي»)، افهم قصده من المحادثة ولا تگول أبدًا إنه ما دز صورة أو إنك ما تتذكر. لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
+const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. الدقة أهم شي: لا تخترع أسماء أو تواريخ أو أرقام، وإذا المستخدم ذكر معلومة لا توافقه عليها إلا إذا متأكد إنها صحيحة، وإذا ما متأكد گول بصراحة. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…)، ويشوف الصور اللي يدزها المستخدم ويعدل عليها. لا تگول أبدًا إنك سويت أو دزيت صورة أو فيديو أو مقطع أو موقع أو ملف إلا إذا البوت فعلًا سواه، ولا تكتب أبدًا كلام بين أقواس مربعة [ ] (الأقواس بالمحادثة سجل يكتبه البوت نفسه لما ينفذ شي فعلًا). إذا المستخدم يريد مقطع فيديو گله يكتب «سويلي فيديو …» ويوصف شنو يريد. تذكّر كل المحادثة وارجع لها: إذا المستخدم أشار لشي گاله قبل أو لصورة دزها أو رسمناها (مثل «هاي» أو «الصورة» أو «نفس الشي»)، افهم قصده من المحادثة ولا تگول أبدًا إنه ما دز صورة أو إنك ما تتذكر. لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
 
 // ───── Telegram API ─────
 async function tg(method, body) {
@@ -49,7 +49,7 @@ const ASKS_ABOUT = new RegExp([
   "who\\s+(made|built|created|developed|trained)\\s+you|what\\s+(ai|model|llm)\\s+(are|is)",
 ].join("|"), "i");
 // «سويلي فيديو/مقطع…»: إنشاء مقطع بالذكاء الاصطناعي من الوصف (مو رفع دقة مقطع)
-const VIDEO_GEN = /(سوي|سوّي|سويلي|سوّيلي|اسوي|اعمل|اعملي|اعملّي|انشئ|أنشئ|انشأ|صمم|صمّم|صمملي|ولد|ولّد|ولدلي|اصنع|ابي|أبي|اريد|أريد|بدي|عايز|make|create|generate)[^\n]{0,40}(فيديو|فديو|ڤيديو|مقطع|كليب|انيميشن|أنيميشن|video|clip|animation)/i;
+const VIDEO_GEN = /(سوي|سوّي|سويلي|سوّيلي|اسوي|اعمل|اعملي|اعملّي|انشئ|أنشئ|انشأ|انشاء|إنشاء|حول|حوّل|حولها|حوّلها|خلي|خليها|خلّيها|صمم|صمّم|صمملي|ولد|ولّد|ولدلي|اصنع|ابي|أبي|اريد|أريد|بدي|عايز|make|create|generate)[^\n]{0,40}(فيديو|فديو|ڤيديو|مقطع|كليب|انيميشن|أنيميشن|video|clip|animation)/i;
 const isVideoGen = (t) => VIDEO_GEN.test(t) && !/(دق[ةه]|ارفع|إرفع|وضح|وضّح|حسن|حسّن|upscale|enhance|موقع|متجر|تطبيق|لعب[ةه]|صفح[ةه]|website|site|app)/i.test(t);
 const linkButtons = (rows) => ({ reply_markup: { inline_keyboard: rows.map((r) => r.map(([text, url]) => ({ text, url }))) } });
 
@@ -185,6 +185,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     if (!r.ok) return send(chat_id, "صار خلل بالنماذج، جرّب بعد شوية 🙏");
     answer = d.text || "";
   }
+  answer = String(answer).replace(/^\s*\[[^\]\n]{3,300}\]\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim() || answer; // ما نخلي النموذج يدّعي إنه سوى شي
   let spoken = false;
   if (voice) {
     try {
@@ -242,7 +243,7 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
 }
 
 // إنشاء مقطع بالذكاء الاصطناعي: نكتب وصف إنكليزي ممتاز ونبعثه لأجهزة GitHub، وهي تسويه وتدزه للمستخدم
-async function doVideoGen(chat_id, user, state, text, reply_to) {
+async function doVideoGen(chat_id, user, state, text, reply_to, imageId) {
   const status = await send(chat_id, "🎬 دا أجهز المقطع… ياخذ تقريبًا 1–3 دقايق، وراح يوصلك هنا.");
   let prompt = text;
   try {
@@ -251,7 +252,8 @@ async function doVideoGen(chat_id, user, state, text, reply_to) {
       ...recent(state).slice(-4), { role: "user", content: text },
     ], { provider: "gemini", max_tokens: 300, timeout: 25_000 })).trim().replace(/^["']|["']$/g, "") || text;
   } catch (e) { console.error("video prompt", e.message); }
-  const ok = await dispatch("videogen", { chat_id, reply_to, status_message_id: status?.message_id, prompt: prompt.slice(0, 900), request: text.slice(0, 300) });
+  const ok = await dispatch("videogen", { chat_id, reply_to, status_message_id: status?.message_id, prompt: prompt.slice(0, 900), request: text.slice(0, 300),
+    image_url: imageId ? `${SITE_BASE()}/i/${imageId}` : undefined });
   if (!ok && status) await edit(chat_id, status.message_id, "خدمة إنشاء المقاطع ما تشتغل هسه 🙏 جرّب بعد شوية.");
   await logUsage(user.id, "videogen", 0, "github", "videogen").catch(() => {});
   await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: `[دا أسوي مقطع فيديو بالذكاء الاصطناعي: ${prompt.slice(0, 200)}]` }]);
@@ -411,6 +413,7 @@ async function imageFollowup(chat_id, user, state, img, text, { voice, fromPhoto
   catch (e) { console.error("image plan", e.message); plan = { action: fromPhoto ? "ask" : "other" }; }
   if (plan.action === "edit") { await doImageEdit(chat_id, user, state, img, text, plan); return true; }
   if (plan.action === "enhance") { await doEnhance(chat_id, user, state, img, text); return true; }
+  if (plan.action === "video") { await doVideoGen(chat_id, user, state, text, undefined, img.id); return true; }
   if (plan.action === "ask" || (fromPhoto && plan.action === "other")) { await doVision(chat_id, user, state, img, text, { voice }); return true; }
   if (plan.action === "new") { await doImage(chat_id, user, text, state); return true; }
   return false;
@@ -487,7 +490,16 @@ async function handleMessage(update) {
     }
   }
   if (provider === "auto" && isVideoGen(text)) return doVideoGen(chat_id, user, state, text, msg.message_id);
-  const intent = detectIntent(text, !!state.site_slug);
+  let intent = detectIntent(text, !!state.site_slug);
+  // رسالة قصيرة («حوله»، «سويها»، «اي يلا») بعد ما انعرض شي: نفهم من المحادثة شنو ينطلب وننفذه فعلًا
+  if (provider === "auto" && intent.type === "chat" && text.length <= 40 && recent(state).length >= 2) {
+    try {
+      const r = await routeFollowup({ history: recent(state), text });
+      if (r.action === "video") return doVideoGen(chat_id, user, state, r.request, msg.message_id);
+      if (r.action === "image") return doImage(chat_id, user, r.request, state);
+      if (r.action === "site") { const it = detectIntent(r.request); return doSite(chat_id, user, state, r.request, it.kind || "website", false); }
+    } catch (e) { console.error("route", e.message); }
+  }
   if (intent.type === "lovable") { // بالبوت نبنيه وننشره مباشرة بدل ما نحوله لمنصة ثانية
     const req = stripLovable(text);
     return doSite(chat_id, user, state, req, (AR_SITE.find(([, re]) => re.test(req)) || ["website"])[0], false);

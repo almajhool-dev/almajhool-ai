@@ -26,6 +26,7 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       JOB: ${{ toJSON(github.event.client_payload) }}
       TEST_PROMPT: ${{ github.event.inputs.prompt }}
+      TEST_IMAGE_URL: ${{ github.event_name == 'push' && 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

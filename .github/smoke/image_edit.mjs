@@ -1,7 +1,7 @@
 // تجربة حقيقية: محادثة فيها اسم «المجهول» + صورة بزونة. البوت يفهم الطلب، يعدّل بدقة، ويتأكد من النتيجة
 import fs from "fs";
 import { GlobalFonts, createCanvas } from "@napi-rs/canvas";
-import { planImageFollowup, preciseEdit, editImage, enhanceImage, verifyEdit, visionMessages } from "./api/_imageedit.js";
+import { planImageFollowup, preciseEdit, editImage, enhanceImage, routeFollowup, verifyEdit, visionMessages } from "./api/_imageedit.js";
 import { loadImage } from "@napi-rs/canvas";
 import { directText } from "./api/_direct.js";
 GlobalFonts.registerFromPath("fonts/maj-arabic.ttf", "A");
@@ -57,6 +57,16 @@ console.log(memo.action === "other" ? "MEMORY_OK " : "MEMORY_BAD", memo.action);
   try { const e = await enhanceImage({ bytes: low, mime: "image/jpeg" }); fs.writeFileSync("../out/cat-low.jpg", low); fs.writeFileSync("../out/cat-enhanced.jpg", e.bytes);
     console.log("ENHANCE_OK", ((Date.now() - t) / 1000).toFixed(1) + "s", `200x200 -> ${e.w}x${e.h}`, "via", e.provider); }
   catch (e) { bad++; console.log("ENHANCE_FAIL", e.message.slice(0, 300)); }
+}
+{ // نفس محادثة المستخدم الحقيقية: «انشاء مقطع علئ هاذه صوره» ← عرض ← «حوله» لازم يصير فيديو
+  const h = [{ role: "user", content: "[دزيت صورة]" }, { role: "user", content: "[عن الصورة] انشاء مقطع علئ هاذه صوره" },
+             { role: "assistant", content: "حبيبي، الصورة بيها لقطات لأسد يركض بالصحراء. اگدر أحولك هاي الصور إلى مقطع فيديو متحرك، تريد؟" }];
+  const r = await routeFollowup({ history: h, text: "حوله" });
+  console.log(r.action === "video" ? "ROUTE_OK " : "ROUTE_BAD", r.action, "|", r.request); if (r.action !== "video") bad++;
+  const r2 = await routeFollowup({ history: h, text: "شكرا حبيبي" });
+  console.log(r2.action === "chat" ? "ROUTE_OK " : "ROUTE_BAD", r2.action, "| شكرا حبيبي"); if (r2.action !== "chat") bad++;
+  const p = await planImageFollowup({ ...cat, history: [], text: "انشاء مقطع علئ هاذه صوره" });
+  console.log(p.action === "video" ? "PLAN_VIDEO_OK " : "PLAN_VIDEO_BAD", p.action); if (p.action !== "video") bad++;
 }
 const ans = await directText(visionMessages("رد باللهجة العراقية وباختصار.", history, "منو الأسماء اللي بالمحادثة؟", chat.bytes, chat.mime), { provider: "gemini", max_tokens: 200 });
 console.log("VISION |", ans.replace(/\s+/g, " ").slice(0, 200));
