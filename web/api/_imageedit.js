@@ -300,17 +300,22 @@ export async function preciseEdit({ bytes, mime, plan }) {
   if (plan.op !== "remove" && !plan.newText) return null;
   const im = await loadImage(bytes);
   const w = im.width, h = im.height;
-  const what = plan.op === "add_text" ? `the best empty area for new text: ${plan.target}` : plan.target;
-  let boxes = await locateTargets({ bytes, mime, target: what, w, h });
-  if (!boxes.length) return null;
+  // كتابة جديدة: المكان نحسبه بأنفسنا من الطلب (فوگ/جوه/بالنص، يمين/يسار)؛ المسح والتبديل: Gemini يحدد المكان بالضبط
+  let boxes;
+  if (plan.op === "add_text") {
+    const t = plan.target.toLowerCase(), bandH = Math.round(h * 0.09), bandW = Math.round(w * 0.8);
+    const y0 = /bottom|lower|below/.test(t) ? h - bandH - Math.round(h * 0.04) : /center|middle/.test(t) ? Math.round((h - bandH) / 2) : Math.round(h * 0.04);
+    const x0 = /left/.test(t) ? Math.round(w * 0.04) : /right/.test(t) ? w - bandW - Math.round(w * 0.04) : Math.round((w - bandW) / 2);
+    boxes = [{ x0, y0, x1: x0 + bandW, y1: y0 + bandH }];
+  } else {
+    boxes = await locateTargets({ bytes, mime, target: plan.target, w, h });
+    if (!boxes.length) return null;
+  }
   const canvas = createCanvas(w, h), ctx = canvas.getContext("2d");
   ctx.drawImage(im, 0, 0);
   if (plan.op === "add_text") {
     // كتابة جديدة: مربع مناسب الحجم، ولون يبين فوق الخلفية (أسود فوق الفاتح، أبيض فوق الغامق)
     const b = boxes[0];
-    const minH = Math.round(h * 0.07), cy = (b.y0 + b.y1) / 2;
-    if (b.y1 - b.y0 < minH) { b.y0 = Math.max(0, Math.round(cy - minH / 2)); b.y1 = Math.min(h, b.y0 + minH); }
-    if (b.x1 - b.x0 < w * 0.3) { const cx = (b.x0 + b.x1) / 2; b.x0 = Math.max(0, Math.round(cx - w * 0.2)); b.x1 = Math.min(w, Math.round(cx + w * 0.2)); }
     const px = ctx.getImageData(b.x0, b.y0, Math.max(1, b.x1 - b.x0), Math.max(1, b.y1 - b.y0)).data;
     let lum = 0; for (let i = 0; i < px.length; i += 4) lum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
     b.color = lum / (px.length / 4) > 140 ? "#111111" : "#ffffff";
