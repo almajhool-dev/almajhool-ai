@@ -1,3 +1,10 @@
+// مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
+{
+  const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
+    .flatMap((k) => String(k || "").split(/[\s,]+/)).filter(Boolean);
+  if (all.length) process.env.GEMINI_API_KEY = [...new Set(all)].join(",");
+}
+
 // نماذج متصلة مباشرة بالموقع (بدون المرور بالبوابة) — مفاتيحها في متغيرات Vercel
 // تُضاف المفاتيح في أسرار GitHub، والنشر التلقائي يمررها للموقع.
 // كل متغير يقبل عدة مفاتيح مفصولة بفاصلة، وتُجرّب بالتناوب.

@@ -4,6 +4,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { Mp3Encoder } from "@breezystack/lamejs";
+// مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
+{
+  const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
+    .flatMap((k) => String(k || "").split(/[\s,]+/)).filter(Boolean);
+  if (all.length) process.env.GEMINI_API_KEY = [...new Set(all)].join(",");
+}
+
 
 const GEMINI_KEYS = () => String(process.env.GEMINI_API_KEY || "").split(/[\s,]+/).filter(Boolean);
 const LISTEN_MODELS = () => {
@@ -95,7 +102,7 @@ function secMsGec() {
 }
 const xmlEscape = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
-export function edgeTTS(text, voice = "ar-IQ-BasselNeural", { timeout = 30_000 } = {}) {
+export function edgeTTS(text, voice = "ar-IQ-BasselNeural", { timeout = 30_000, rate = "+0%" } = {}) {
   return new Promise((resolve, reject) => {
     const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED}`
       + `&ConnectionId=${randomUUID().replace(/-/g, "")}&Sec-MS-GEC=${secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM}`;
@@ -118,7 +125,7 @@ export function edgeTTS(text, voice = "ar-IQ-BasselNeural", { timeout = 30_000 }
         + `{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n`);
       const lang = voice.split("-").slice(0, 2).join("-");
       ws.send(`X-RequestId:${randomUUID().replace(/-/g, "")}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${ts}Z\r\nPath:ssml\r\n\r\n`
-        + `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${lang}'><voice name='${voice}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${xmlEscape(text)}</prosody></voice></speak>`);
+        + `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${lang}'><voice name='${voice}'><prosody pitch='+0Hz' rate='${rate}' volume='+0%'>${xmlEscape(text)}</prosody></voice></speak>`);
     });
     ws.on("message", (data, isBinary) => {
       if (isBinary) {
