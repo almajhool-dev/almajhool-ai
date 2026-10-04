@@ -15,20 +15,24 @@ export async function ensureVideoTable() {
   ready = true;
 }
 
-/** يطلب من GitHub يبدي المعالجة فورًا (إذا اكو مفتاح). بدونه: الجدولة كل 5 دقايق تلگاه */
-export async function wakeWorker() {
+/** يشغّل شغلة على أجهزة GitHub (رفع دقة مقطع، إنشاء مقطع…) مع بياناتها */
+export async function dispatch(event_type, client_payload) {
   const token = process.env.GH_DISPATCH_TOKEN;
   if (!token) return false;
   const repo = process.env.GH_REPO || "almajhool-dev/almajhool-ai";
   const r = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json", "User-Agent": "almajhool-ai" },
-    body: JSON.stringify({ event_type: "upscale" }),
-  }).catch((e) => { console.error("wakeWorker:", e?.message); return null; });
-  if (r && !r.ok) console.error("wakeWorker: GitHub HTTP", r.status, (await r.text().catch(() => "")).slice(0, 200));
+    body: JSON.stringify(client_payload ? { event_type, client_payload } : { event_type }),
+  }).catch((e) => { console.error("dispatch:", e?.message); return null; });
+  if (r && !r.ok) console.error("dispatch: GitHub HTTP", r.status, (await r.text().catch(() => "")).slice(0, 200));
   return !!r?.ok;
 }
 
+/** يطلب من GitHub يبدي المعالجة فورًا (إذا اكو مفتاح). بدونه: الجدولة كل 5 دقايق تلگاه */
+export async function wakeWorker() {
+  return dispatch("upscale");
+}
 export async function POST(request) {
   if (!WORKER_KEY || request.headers.get("x-worker-key") !== WORKER_KEY) return json({ error: "forbidden" }, 403);
   await ensureVideoTable();
