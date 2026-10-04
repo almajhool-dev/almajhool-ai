@@ -10,7 +10,7 @@ import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
-import { editImage, planImageFollowup, redrawPrompt, visionMessages } from "./_imageedit.js";
+import { editImage, planImageFollowup, preciseEdit, redrawPrompt, verifyEdit, visionMessages } from "./_imageedit.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
 import { ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
@@ -228,29 +228,46 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
   await remember(chat_id, state, [{ role: "user", content: `[عن الصورة] ${text || "شنو بهاي الصورة؟"}` }, { role: "assistant", content: answer }], { kind: "image" });
 }
 
-async function doImageEdit(chat_id, user, state, img, request, instruction) {
+async function doImageEdit(chat_id, user, state, img, request, plan = {}) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.images >= user.daily_images) return send(chat_id, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا 🌙`);
   const status = await send(chat_id, "🪄 دا أعدّل على الصورة…");
   const tick = setInterval(() => action(chat_id, "upload_photo").catch(() => {}), 4500); action(chat_id, "upload_photo");
   try {
-    const how = instruction || request;
-    let out, redrawn = false;
-    try { out = await editImage({ bytes: img.bytes, mime: img.mime, instruction: how, publicUrl: `${SITE_BASE()}/i/${img.id}` }); }
-    catch (e) {
-      console.error("image edit", e.message);
-      // ما اكو محرك تعديل متاح هسه: نرسم نسخة جديدة قريبة من الصورة بالتعديل المطلوب
-      const prompt = await redrawPrompt({ bytes: img.bytes, mime: img.mime, instruction: how });
-      const r = await generateImage({ prompt });
-      out = { bytes: r.bytes, mime: r.mime, provider: r.data.provider || "redraw" };
-      redrawn = true;
+    const how = plan.instruction || request;
+    const check = (after) => verifyEdit({ before: img, after, instruction: how });
+    let out = null, caption = "تفضل، عدّلتها ✨", note = "";
+    // 1) مسح/تبديل/إضافة كتابة: نحدد المكان بالضبط ونعدّل بأنفسنا (بدون تخمين نموذج رسم)
+    try {
+      out = await preciseEdit({ bytes: img.bytes, mime: img.mime, plan });
+      if (out && plan.op !== "add_text") { // نتأكد ما بقى شي، وإذا بقى نعيد مرة على النتيجة
+        const v = await check(out).catch(() => ({ ok: true }));
+        if (!v.ok) {
+          const again = await preciseEdit({ bytes: out.bytes, mime: out.mime, plan }).catch(() => null);
+          if (again) out = again;
+        }
+      }
+    } catch (e) { console.error("precise edit", e.message); out = null; }
+    // 2) باقي التعديلات: نماذج التعديل، وكل نتيجة يفحصها Gemini قبل ما ندزها
+    if (!out) {
+      try {
+        out = await editImage({ bytes: img.bytes, mime: img.mime, instruction: how, publicUrl: `${SITE_BASE()}/i/${img.id}`, verify: check });
+        if (!out.verified) { caption = "هذا أقرب شي گدرت أسويه 🙏 إذا مو مثل ما تريد، وضّحلي أكثر شنو أغيّر وبأي مكان."; note = " (مو مضبوط 100%)"; }
+      } catch (e) {
+        console.error("image edit", e.message);
+        // 3) ما اكو محرك تعديل متاح هسه: نرسم نسخة جديدة قريبة من الصورة بالتعديل المطلوب
+        const prompt = await redrawPrompt({ bytes: img.bytes, mime: img.mime, instruction: how });
+        const r = await generateImage({ prompt });
+        out = { bytes: r.bytes, mime: r.mime, provider: r.data.provider || "redraw" };
+        caption = "تفضل 🎨 (رسمتها من جديد قريبة من صورتك ويا التعديل اللي طلبته)"; note = " (نسخة مرسومة من جديد)";
+      }
     }
     const id = await storeImage(user, out.bytes, out.mime, `[تعديل] ${request}`, out.provider);
     await logUsage(user.id, "image", 0, out.provider, out.provider);
-    await sendPhoto(chat_id, out.bytes, out.mime, redrawn ? "تفضل 🎨 (رسمتها من جديد قريبة من صورتك ويا التعديل اللي طلبته)" : "تفضل، عدّلتها ✨");
+    await sendPhoto(chat_id, out.bytes, out.mime, caption);
     if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
     await remember(chat_id, state, [{ role: "user", content: `[طلب تعديل على الصورة] ${request}` },
-      { role: "assistant", content: `[عدّلت الصورة ودزيتها${redrawn ? " (نسخة مرسومة من جديد)" : ""}: ${how.slice(0, 300)}]` }], { image: id, kind: "image" });
+      { role: "assistant", content: `[عدّلت الصورة ودزيتها${note}: ${how.slice(0, 300)}]` }], { image: id, kind: "image" });
   } catch (e) {
     console.error("image edit/redraw", e.message);
     if (status) await edit(chat_id, status.message_id, "ما گدرت أعدّل الصورة هسه، جرّب مرة ثانية بعد شوية 🙏");
@@ -340,7 +357,7 @@ async function imageFollowup(chat_id, user, state, img, text, { voice, fromPhoto
   let plan;
   try { plan = await planImageFollowup({ bytes: img.bytes, mime: img.mime, history: recent(state), text }); }
   catch (e) { console.error("image plan", e.message); plan = { action: fromPhoto ? "ask" : "other" }; }
-  if (plan.action === "edit") { await doImageEdit(chat_id, user, state, img, text, plan.instruction); return true; }
+  if (plan.action === "edit") { await doImageEdit(chat_id, user, state, img, text, plan); return true; }
   if (plan.action === "ask" || (fromPhoto && plan.action === "other")) { await doVision(chat_id, user, state, img, text, { voice }); return true; }
   if (plan.action === "new") { await doImage(chat_id, user, text, state); return true; }
   return false;
