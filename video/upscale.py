@@ -218,6 +218,27 @@ def stage_claim():
     return True
 
 
+
+def start_times(path):
+    """بداية الصورة وبداية الصوت (بالثواني) — حتى نحافظ على الفرق بينهم"""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,start_time", "-of", "json", path],
+                         capture_output=True, text=True).stdout
+    v = a = None
+    for st in json.loads(out or "{}").get("streams", []):
+        t = st.get("start_time")
+        t = float(t) if t not in (None, "N/A") else None
+        if st.get("codec_type") == "video" and v is None:
+            v = t
+        elif st.get("codec_type") == "audio" and a is None:
+            a = t
+    return v, a
+
+
+def count_frames(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+                          "stream=nb_read_packets", "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip()
+    return int(out) if out.isdigit() else 0
+
 def stage_prepare(test_url=None):
     os.makedirs(WORK, exist_ok=True)
     if test_url:
@@ -240,12 +261,23 @@ def stage_prepare(test_url=None):
             download(f"https://api.telegram.org/file/bot{BOT}/{f['result']['file_path']}", raw)
     info0 = probe(os.path.join(WORK, "in.mp4"))
     fps = round(info0["fps"], 3)
-    # نوحّد المقطع: معدل إطارات ثابت + إطار مفتاحي كل ثانية حتى كل جهاز يقص جزئه بالضبط
+    # الصوت بمقاطع الموبايل أحيانًا يبدي قبل الصورة أو بعدها بجزء من الثانية: نحافظ على نفس الفرق بالضبط
+    v0, a0 = start_times(os.path.join(WORK, "in.mp4"))
+    d = (a0 - v0) if (a0 is not None and v0 is not None) else 0.0
+    if d > 0.001:
+        af = f"asetpts=PTS-STARTPTS,adelay={round(d * 1000)}:all=1"
+    elif d < -0.001:
+        af = f"asetpts=PTS-STARTPTS,atrim=start={-d:.6f},asetpts=PTS-STARTPTS"
+    else:
+        af = "asetpts=PTS-STARTPTS"
+    log(f"AV_OFFSET video_start={v0} audio_start={a0} -> audio shifted {d:+.3f}s")
+    # نوحّد المقطع: يبدي من الصفر، معدل إطارات ثابت + إطار مفتاحي كل ثانية حتى كل جهاز يقص جزئه بالضبط
     sh(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(WORK, "in.mp4"), "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", f"fps={fps}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-g", str(max(1, round(fps))),
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", os.path.join(WORK, "src.mkv")])
+        "-vf", f"setpts=PTS-STARTPTS,fps={fps}", "-af", af, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10",
+        "-g", str(max(1, round(fps))), "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", os.path.join(WORK, "src.mkv")])   # صوت بدون ضغط: ما يضيف تأخير
     info = probe(os.path.join(WORK, "src.mkv"))
     info["fps"] = fps
+    info["frames"] = count_frames(os.path.join(WORK, "src.mkv")) or info["frames"]   # العدد الحقيقي، مو تقدير
     plan = plan_for(info)
     job.update({"info": info, "plan": plan})
     with open(os.path.join(WORK, "job.json"), "w") as f:
@@ -264,7 +296,9 @@ def stage_process(seg_index):
     seg = next(x for x in plan["segments"] if x["i"] == seg_index)
     fps, ow, oh = info["fps"], plan["ow"], plan["oh"]
     out = os.path.join(WORK, f"seg_{seg_index:03d}.mp4")
-    start_t = seg["start"] / fps
+    # نبدي قبل الإطار بنص إطار: توقيتات الملف مقرّبة للملي ثانية، وبدون هذا ممكن جهاز يبدي بإطار زايد أو ناقص
+    # (وبعشرين جهاز يتجمع الفرق ويصير الصوت متقدم أو متأخر)
+    start_t = max(0.0, (seg["start"] - 0.5) / fps)
     enc = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{ow}x{oh}", "-r", str(fps), "-i", "-",
            "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", out]
     if plan["mode"] == "ffmpeg":
@@ -302,6 +336,13 @@ def stage_process(seg_index):
     log(f"SEG_DONE {seg_index} frames={done} seconds={time.time() - t0:.1f}")
 
 
+
+def stream_durations(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "json", path],
+                         capture_output=True, text=True).stdout
+    d = {st.get("codec_type"): st.get("duration") for st in json.loads(out or "{}").get("streams", [])}
+    return d.get("video"), d.get("audio")
+
 def stage_merge():
     with open(os.path.join(WORK, "job.json")) as f:
         job = json.load(f)
@@ -315,6 +356,8 @@ def stage_merge():
     out = os.path.join(WORK, "out.mp4")
     sh(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-i", os.path.join(WORK, "src.mkv"),
         "-map", "0:v:0", "-map", "1:a:0?", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", out])
+    vd, ad = stream_durations(out)
+    log(f"SYNC frames={count_frames(out)}/{info['frames']} video={vd} audio={ad} source={info['duration']:.3f}")
     limit = 1990 * 1024 * 1024 if MTPROTO or job.get("test") else BOTAPI_OUT
     if os.path.getsize(out) > limit:   # أكبر من حد تلكرام: نعيد الضغط بحجم يناسب
         kbps = max(300, int(limit * 8 / 1024 / max(1, info["duration"]) * 0.92) - 192)
