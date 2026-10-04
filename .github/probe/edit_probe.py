@@ -1,6 +1,6 @@
 # تجربة: منو يگدر يعدل صورة مجانًا؟ (Gemini بمفتاحنا، Pollinations kontext، مساحات Hugging Face)
 import base64, json, os, time, urllib.request, urllib.parse
-IMG_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/640px-Cat03.jpg"
+IMG_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg"
 EDIT = "Remove the cat's whiskers and make the background bright blue. Keep everything else the same."
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
 
