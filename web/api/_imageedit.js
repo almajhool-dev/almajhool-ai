@@ -343,19 +343,27 @@ export async function preciseEdit({ bytes, mime, plan }) {
   return { bytes: canvas.toBuffer("image/png"), mime: "image/png", provider: `precise-${plan.op}`, boxes: boxes.length };
 }
 
-// ───────── تحسين الصور مثل Remini: توضيح الوجوه + رفع الدقة (CodeFormer مجاني) ─────────
-const ENHANCERS = ["sczhou/CodeFormer"];
-/** يرجع { bytes, mime, provider, w, h } أكبر وأوضح من الأصل، أو يرمي خطأ */
+// ───────── تحسين الصور مثل Remini ─────────
+// 1) إذا بيها وجوه: CodeFormer يصلّح الوجوه (عيون، بشرة، ملامح)
+// 2) لكل الصور: Real-ESRGAN يوضّح كل شي (نص، شعارات، أشياء، مناظر) ويكبّر ×4 — داخل سيرفرنا، ما يعتمد على خدمة خارجية
+async function hasFaces(bytes, mime) {
+  const out = await directText([{ role: "user", content: [
+    { type: "text", text: "Does this image contain a clearly visible human face (a photo of a person or a realistic portrait painting; not a logo, icon, cartoon or emoji)? Answer only yes or no." },
+    { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } },
+  ] }], { provider: "gemini", prefer: LITE(), max_tokens: 10, timeout: 15_000 });
+  return /yes|نعم/i.test(String(out));
+}
+
+/** يرجع { bytes, mime, provider, w, h } أوضح وأكبر من الأصل */
 export async function enhanceImage({ bytes, mime }) {
-  const src = await loadImage(bytes);
-  const errors = [];
-  for (const sp of ENHANCERS) {
-    try {
-      const r = await gradioEdit(sp, bytes, mime, "");
-      const im = await loadImage(r.bytes);
-      if (im.width <= src.width && im.height <= src.height) throw new Error("result is not bigger");
-      return { ...r, w: im.width, h: im.height };
-    } catch (e) { errors.push(`${sp}: ${String(e.message).slice(0, 160)}`); }
+  const { upscale4x } = await import("./_upscale.js");
+  let base = { bytes, mime };
+  const used = [];
+  if (await hasFaces(bytes, mime).catch(() => false)) {
+    try { const r = await gradioEdit("sczhou/CodeFormer", bytes, mime, ""); base = r; used.push("codeformer"); }
+    catch (e) { console.error("codeformer", e.message); }
   }
-  throw new Error(errors.join(" | "));
+  const up = await upscale4x(base.bytes);
+  used.push("real-esrgan");
+  return { ...up, provider: used.join("+") };
 }
