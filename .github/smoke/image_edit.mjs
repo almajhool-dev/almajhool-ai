@@ -1,7 +1,8 @@
 // تجربة حقيقية: محادثة فيها اسم «المجهول» + صورة بزونة. البوت يفهم الطلب، يعدّل بدقة، ويتأكد من النتيجة
 import fs from "fs";
 import { GlobalFonts, createCanvas } from "@napi-rs/canvas";
-import { planImageFollowup, preciseEdit, editImage, verifyEdit, visionMessages } from "./api/_imageedit.js";
+import { planImageFollowup, preciseEdit, editImage, enhanceImage, verifyEdit, visionMessages } from "./api/_imageedit.js";
+import { loadImage } from "@napi-rs/canvas";
 import { directText } from "./api/_direct.js";
 GlobalFonts.registerFromPath("fonts/maj-arabic.ttf", "A");
 const c = createCanvas(720, 540), g = c.getContext("2d");
@@ -17,14 +18,21 @@ bubble(40, "المجهول", "هلا شلونكم شباب؟", "#1a73e8");
 bubble(200, "أحمد علي", "تمام الحمد لله", "#d93025");
 bubble(360, "المجهول", "يلا نلتقي باچر", "#1a73e8");
 const chat = { bytes: c.toBuffer("image/png"), mime: "image/png" };
+const gc = createCanvas(720, 900), gg = gc.getContext("2d");
+const gr = gg.createLinearGradient(0, 0, 720, 900); gr.addColorStop(0, "#0f2027"); gr.addColorStop(0.5, "#2c5364"); gr.addColorStop(1, "#1fa2a6");
+gg.fillStyle = gr; gg.fillRect(0, 0, 720, 900);
+gg.fillStyle = "#000"; gg.beginPath(); gg.arc(150, 300, 90, 0, 7); gg.fill();
+gg.fillStyle = "#fff"; gg.font = "bold 44px A"; gg.direction = "rtl"; gg.textAlign = "right"; gg.fillText("المجهول", 650, 320); gg.fillText("أحمد", 650, 600);
+const grad = { bytes: gc.toBuffer("image/png"), mime: "image/png" };
 const cat = { bytes: fs.readFileSync("cat.jpg"), mime: "image/jpeg" };
 fs.mkdirSync("../out", { recursive: true });
 fs.writeFileSync("../out/chat-0.png", chat.bytes);
 const history = [{ role: "user", content: "[دزيت صورة]" }, { role: "assistant", content: "وصلتني الصورة 👌 شتريد أسوي بيها؟" }];
 let bad = 0;
-for (const [img, text, file] of [[chat, "شيل اسم المجهول", "chat-remove"], [chat, "غير اسم المجهول الى أبو علي", "chat-replace"], [chat, "اكتب فوگ كلمة بغداد", "chat-add"], [cat, "شيل الشغلة الحمرة اللي فوگ", "cat-remove"]]) {
+for (const [img, text, file] of [[chat, "شيل اسم المجهول", "chat-remove"], [chat, "غير اسم المجهول الى أبو علي", "chat-replace"], [chat, "اكتب فوگ كلمة بغداد", "chat-add"], [cat, "شيل الشغلة الحمرة اللي فوگ", "cat-remove"], [grad, "شيل الصورة السودة واسم المجهول", "grad-remove"], [chat, "وضحها وارفع دقتها", "-plan-only"]]) {
   const t = Date.now();
   const plan = await planImageFollowup({ ...img, history, text });
+  if (file === "-plan-only") { const ok = plan.action === "enhance"; if (!ok) bad++; console.log(ok ? "PLAN_ENHANCE_OK " : "PLAN_ENHANCE_BAD", text, "=>", plan.action); continue; }
   let out = await preciseEdit({ ...img, plan }).catch((e) => (console.log("  precise error", e.message), null));
   let how = out ? out.provider : "";
   if (!out) { out = await editImage({ ...img, instruction: plan.instruction, verify: (a) => verifyEdit({ before: img, after: a, instruction: plan.instruction }) }); how = out.provider + (out.verified ? "" : " (unverified)"); }
@@ -32,6 +40,16 @@ for (const [img, text, file] of [[chat, "شيل اسم المجهول", "chat-re
   if (!v.ok) bad++;
   fs.writeFileSync(`../out/${file}.png`, out.bytes);
   console.log(v.ok ? "EDIT_OK  " : "EDIT_BAD ", ((Date.now() - t) / 1000).toFixed(1) + "s", "|", text, "| plan:", plan.action, plan.op, JSON.stringify(plan.target).slice(0, 90), plan.newText, "| via", how, v.ok ? "" : "| " + v.problem);
+}
+const memo = await planImageFollowup({ ...chat, history: [...history, { role: "user", content: "اكتبلي خطة مشروع منصة SaaS" }, { role: "assistant", content: "هاي الخطة: ..." }], text: "تذكر قبل شويه شكتلك تسويلي" });
+console.log(memo.action === "other" ? "MEMORY_OK " : "MEMORY_BAD", memo.action);
+{ // تحسين مثل Remini: صورة وجه صغيرة ومضغوطة ← أوضح وأكبر
+  const face = await loadImage(fs.readFileSync("face.jpg")); const fc = createCanvas(160, Math.round(160 * face.height / face.width));
+  fc.getContext("2d").drawImage(face, 0, 0, fc.width, fc.height); const low = fc.toBuffer("image/jpeg", 60);
+  const t = Date.now();
+  try { const e = await enhanceImage({ bytes: low, mime: "image/jpeg" }); fs.writeFileSync("../out/face-0.jpg", low); fs.writeFileSync("../out/face-enhanced.png", e.bytes);
+    console.log("ENHANCE_OK", ((Date.now() - t) / 1000).toFixed(1) + "s", `${fc.width}x${fc.height} -> ${e.w}x${e.h}`, "via", e.provider); }
+  catch (e) { bad++; console.log("ENHANCE_FAIL", e.message.slice(0, 300)); }
 }
 const ans = await directText(visionMessages("رد باللهجة العراقية وباختصار.", history, "منو الأسماء اللي بالمحادثة؟", chat.bytes, chat.mime), { provider: "gemini", max_tokens: 200 });
 console.log("VISION |", ans.replace(/\s+/g, " ").slice(0, 200));

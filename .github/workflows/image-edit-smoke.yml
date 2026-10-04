@@ -23,7 +23,9 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --no-audit --no-fund
         working-directory: web
-      - run: curl -fsSL -A "Mozilla/5.0" -o web/cat.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg"
+      - run: |
+          curl -fsSL -A "Mozilla/5.0" -o web/cat.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg"
+          curl -fsSL -A "Mozilla/5.0" -o web/face.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Gilbert_Stuart_Williamstown_Portrait_of_George_Washington.jpg/500px-Gilbert_Stuart_Williamstown_Portrait_of_George_Washington.jpg"
       - name: Understand, edit precisely, verify
         run: cp .github/smoke/image_edit.mjs web/ && cd web && node image_edit.mjs
       - name: Show the results (branches other than main)

@@ -21,20 +21,22 @@ New user message: "${text || "(sent the image with no text)"}"
 
 Decide what the user wants, using the conversation and the image (they write in Iraqi Arabic; "هاي/هذا/الشغلة" refer to things in this image):
 - "edit": change this same image (remove/add/replace/recolor something, change background, write text on it, fix it, make it like X…)
+- "enhance": make this same image clearer / sharper / higher resolution / restore an old or blurry photo (وضحها، ارفع دقتها، حسّنها، صفيها، مثل ريميني…)
 - "ask": a question or request about the image's content (what is this, describe, read the text, is it real…)
 - "new": a completely new, unrelated image
-- "other": not about the image
+- "other": not about the image — including when the user refers to something said earlier in the chat rather than to the image (e.g. «تذكر شگتلك قبل شوية», «لا مو عالصورة»), small talk, or a new topic
+Only choose "edit" when the message clearly asks to change the image.
 For "edit", also classify the kind of edit:
 - "remove": only erase something (text, a name, a logo, a watermark, an object, a person…) and nothing else
 - "replace_text": change some written text in the image into other text
 - "add_text": write new text on the image
 - "other": anything else (recolor, change background, add an object, style…)
-Return ONLY JSON: {"action":"edit|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
+Return ONLY JSON: {"action":"edit|enhance|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
   const out = await directText([{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } }] }],
     { provider: "gemini", prefer: LITE(), max_tokens: 400, timeout: 25_000 });
   let j = {};
   try { j = JSON.parse((String(out).match(/\{[\s\S]*\}/) || ["{}"])[0]); } catch { /* نرجع other */ }
-  const action = ["edit", "ask", "new", "other"].includes(j.action) ? j.action : "other";
+  const action = ["edit", "enhance", "ask", "new", "other"].includes(j.action) ? j.action : "other";
   const op = ["remove", "replace_text", "add_text"].includes(j.op) ? j.op : "other";
   return { action, op, target: String(j.target || "").slice(0, 400), newText: String(j.new_text || "").slice(0, 200), instruction: String(j.instruction || "").slice(0, 800) };
 }
@@ -236,29 +238,45 @@ export function eraseRegions(ctx, w, h, boxes) {
     if (!ring.length) continue;
     const med = [0, 1, 2].map((c) => ring.map((p) => p[c]).sort((a, z) => a - z)[ring.length >> 1]);
     const close = ring.filter((p) => Math.abs(p[0] - med[0]) + Math.abs(p[1] - med[1]) + Math.abs(p[2] - med[2]) < 30).length / ring.length;
-    const flat = close > 0.8;
-    // صورة حقيقية ومنطقة كبيرة (مو كتابة صغيرة): التعبئة تطلع مموهة، فنخليها لنموذج التعديل
-    if (!flat && ((Y1 - Y0) > h * 0.1 || (X1 - X0) * (Y1 - Y0) > w * h * 0.05)) return false;
-    jobs.push({ X0, Y0, X1, Y1, med, flat });
+    // سادة حقيقية بس إذا تقريبًا كل الحلقة نفس اللون (المتدرجة تنعبى من حوافها الأربع حتى ما يبين مربع)
+    // سادة حقيقية بس إذا لون الحلقة كله تقريبًا واحد (المتدرجة تنعبى من حوافها الأربع حتى ما يبين مربع)
+    const spread = Math.max(...[0, 1, 2].map((c) => { const v = ring.map((p) => p[c]).sort((a, z) => a - z); return v[Math.floor(v.length * 0.9)] - v[Math.floor(v.length * 0.1)]; }));
+    const flat = close > 0.8 && spread < 4;
+    // خلفية متدرجة/ناعمة (تدرج ألوان، سماء، جدار): الفرق بين كل بكسل وجاره بالحلقة صغير
+    let diff = 0, cnt = 0;
+    for (let y = Math.max(0, Y0 - R); y < Math.min(h, Y1 + R); y += 1) for (let x = Math.max(1, X0 - R); x < Math.min(w, X1 + R); x += 1) {
+      if (x >= X0 && x < X1 && y >= Y0 && y < Y1) continue;
+      const i = (y * w + x) * 4, j = i - 4;
+      diff += Math.abs(d[i] - d[j]) + Math.abs(d[i + 1] - d[j + 1]) + Math.abs(d[i + 2] - d[j + 2]); cnt++;
+    }
+    const smooth = cnt && diff / cnt < 9;
+    // صورة حقيقية مزخرفة ومنطقة كبيرة (مو كتابة صغيرة): التعبئة تطلع مموهة، فنخليها لنموذج التعديل
+    if (!flat && !smooth && ((Y1 - Y0) > h * 0.1 || (X1 - X0) * (Y1 - Y0) > w * h * 0.05)) return false;
+    jobs.push({ X0, Y0, X1, Y1, med, flat, smooth });
   }
-  for (const { X0, Y0, X1, Y1, med, flat } of jobs) {
+  for (const { X0, Y0, X1, Y1, med, flat, smooth } of jobs) {
     if (flat) { // خلفية سادة: نلونها بنفس اللون بالضبط
       for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { const i = (y * w + x) * 4; d[i] = med[0]; d[i + 1] = med[1]; d[i + 2] = med[2]; }
       continue;
     }
-    // خلفية مو سادة: نعبي المنطقة من أطرافها للداخل (انتشار تدريجي) حتى تندمج ويا اللي حواليها
+    // خلفية مو سادة: نعبي المنطقة من أطرافها الأربعة (تدرج سلس بين الحواف = يطابق التدرجات بالضبط)
     const bw = X1 - X0, bh = Y1 - Y0;
     const buf = new Float32Array(bw * bh * 3);
-    const at = (x, y, c) => {
-      if (x < X0 || x >= X1 || y < Y0 || y >= Y1) { const cx = Math.min(w - 1, Math.max(0, x)), cy = Math.min(h - 1, Math.max(0, y)); return d[(cy * w + cx) * 4 + c]; }
-      return buf[((y - Y0) * bw + (x - X0)) * 3 + c];
-    };
-    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) for (let c = 0; c < 3; c++) buf[(y * bw + x) * 3 + c] = med[c];
-    const iters = Math.min(400, Math.max(60, Math.max(bw, bh) * 2));
+    const px = (x, y, c) => { const cx = Math.min(w - 1, Math.max(0, x)), cy = Math.min(h - 1, Math.max(0, y)); return d[(cy * w + cx) * 4 + c]; };
+    const at = (x, y, c) => (x < X0 || x >= X1 || y < Y0 || y >= Y1) ? px(x, y, c) : buf[((y - Y0) * bw + (x - X0)) * 3 + c];
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      const u = (x + 1) / (bw + 1), v = (y + 1) / (bh + 1);
+      for (let c = 0; c < 3; c++) {
+        const L = px(X0 - 1, Y0 + y, c), Rr = px(X1, Y0 + y, c), T = px(X0 + x, Y0 - 1, c), B = px(X0 + x, Y1, c);
+        const c00 = px(X0 - 1, Y0 - 1, c), c10 = px(X1, Y0 - 1, c), c01 = px(X0 - 1, Y1, c), c11 = px(X1, Y1, c);
+        buf[(y * bw + x) * 3 + c] = (1 - u) * L + u * Rr + (1 - v) * T + v * B - ((1 - u) * (1 - v) * c00 + u * (1 - v) * c10 + (1 - u) * v * c01 + u * v * c11);
+      }
+    }
+    const iters = smooth ? 8 : Math.min(200, Math.max(30, Math.max(bw, bh)));
     for (let k = 0; k < iters; k++) for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) for (let c = 0; c < 3; c++)
       buf[((y - Y0) * bw + (x - X0)) * 3 + c] = (at(x - 1, y, c) + at(x + 1, y, c) + at(x, y - 1, c) + at(x, y + 1, c)) / 4;
     for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) {
-      const i = (y * w + x) * 4, j = ((y - Y0) * bw + (x - X0)) * 3, n = (Math.random() - 0.5) * 6; // شوية حبيبات حتى ما تبين ناعمة زيادة
+      const i = (y * w + x) * 4, j = ((y - Y0) * bw + (x - X0)) * 3, n = smooth ? 0 : (Math.random() - 0.5) * 6; // شوية حبيبات بالصور الحقيقية حتى ما تبين ناعمة زيادة
       d[i] = buf[j] + n; d[i + 1] = buf[j + 1] + n; d[i + 2] = buf[j + 2] + n;
     }
   }
@@ -323,4 +341,21 @@ export async function preciseEdit({ bytes, mime, plan }) {
   } else if (!eraseRegions(ctx, w, h, boxes)) return null;
   if (plan.op !== "remove") for (const b of boxes) drawText(ctx, plan.newText, b, b.color);
   return { bytes: canvas.toBuffer("image/png"), mime: "image/png", provider: `precise-${plan.op}`, boxes: boxes.length };
+}
+
+// ───────── تحسين الصور مثل Remini: توضيح الوجوه + رفع الدقة (CodeFormer مجاني) ─────────
+const ENHANCERS = ["sczhou/CodeFormer"];
+/** يرجع { bytes, mime, provider, w, h } أكبر وأوضح من الأصل، أو يرمي خطأ */
+export async function enhanceImage({ bytes, mime }) {
+  const src = await loadImage(bytes);
+  const errors = [];
+  for (const sp of ENHANCERS) {
+    try {
+      const r = await gradioEdit(sp, bytes, mime, "");
+      const im = await loadImage(r.bytes);
+      if (im.width <= src.width && im.height <= src.height) throw new Error("result is not bigger");
+      return { ...r, w: im.width, h: im.height };
+    } catch (e) { errors.push(`${sp}: ${String(e.message).slice(0, 160)}`); }
+  }
+  throw new Error(errors.join(" | "));
 }
