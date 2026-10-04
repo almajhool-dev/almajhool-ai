@@ -51,6 +51,13 @@ console.log(memo.action === "other" ? "MEMORY_OK " : "MEMORY_BAD", memo.action);
     console.log("ENHANCE_OK", ((Date.now() - t) / 1000).toFixed(1) + "s", `${fc.width}x${fc.height} -> ${e.w}x${e.h}`, "via", e.provider); }
   catch (e) { bad++; console.log("ENHANCE_FAIL", e.message.slice(0, 300)); }
 }
+{ // صورة بدون وجه (بزونة صغيرة ومضغوطة): Real-ESRGAN لازم يوضحها ويكبرها
+  const im = await loadImage(cat.bytes); const cc = createCanvas(200, 200); cc.getContext("2d").drawImage(im, 0, 0, 200, 200);
+  const low = cc.toBuffer("image/jpeg", 50), t = Date.now();
+  try { const e = await enhanceImage({ bytes: low, mime: "image/jpeg" }); fs.writeFileSync("../out/cat-low.jpg", low); fs.writeFileSync("../out/cat-enhanced.jpg", e.bytes);
+    console.log("ENHANCE_OK", ((Date.now() - t) / 1000).toFixed(1) + "s", `200x200 -> ${e.w}x${e.h}`, "via", e.provider); }
+  catch (e) { bad++; console.log("ENHANCE_FAIL", e.message.slice(0, 300)); }
+}
 const ans = await directText(visionMessages("رد باللهجة العراقية وباختصار.", history, "منو الأسماء اللي بالمحادثة؟", chat.bytes, chat.mime), { provider: "gemini", max_tokens: 200 });
 console.log("VISION |", ans.replace(/\s+/g, " ").slice(0, 200));
 if (bad > 1) process.exitCode = 1;

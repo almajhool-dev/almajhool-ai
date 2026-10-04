@@ -37,7 +37,7 @@
     },
     "api/telegram.js": {
       "maxDuration": 300,
-      "includeFiles": "fonts/**"
+      "includeFiles": "{fonts/**,models/**,node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs,node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm}"
     }
   }
 }
