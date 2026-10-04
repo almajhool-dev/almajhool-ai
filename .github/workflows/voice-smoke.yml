@@ -48,11 +48,12 @@ jobs:
         working-directory: web
         run: |
           node --input-type=module -e "
-            import { edgeTTS, geminiTTS, normalizeForTTS, transcribe } from './api/_voice.js'; import fs from 'fs';
+            import { edgeIraqi, edgeTTS, geminiTTS, normalizeForTTS, transcribe, diacritizeIraqi } from './api/_voice.js'; import fs from 'fs';
             const T = 'هلا بيكم وعليكم السلام، آني زين الحمد لله، شلونك شخبارك؟ وشكو ماكو اليوم؟ گلي شنو أگدر أخدمك بيه؟';
             const variants = {
               edge_raw: () => edgeTTS(T, 'ar-IQ-BasselNeural'),
               edge_normalized: () => edgeTTS(normalizeForTTS(T), 'ar-IQ-BasselNeural'),
+    edge_tashkeel: async () => { console.log('TASHKEEL', await diacritizeIraqi(T)); return edgeIraqi(T); },
               gemini_tts_default: () => geminiTTS(T, 'iraqi'),
               tts_3_8_flash: () => (process.env.GEMINI_TTS_MODELS = 'gemini-3.8-flash-tts', geminiTTS(T, 'iraqi')),
               tts_3_1_preview: () => (process.env.GEMINI_TTS_MODELS = 'gemini-3.1-flash-tts-preview', geminiTTS(T, 'iraqi')),
