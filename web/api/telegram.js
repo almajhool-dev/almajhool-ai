@@ -10,6 +10,7 @@ import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
+import { editImage, planImageFollowup, redrawPrompt, visionMessages } from "./_imageedit.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
 import { ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
@@ -18,7 +19,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || (TOKEN ? createHash("sha256").update(TOKEN).digest("hex").slice(0, 48) : "");
 const SITE = (process.env.PUBLIC_URL || "https://almajhool-ai.vercel.app").replace(/\/$/, "");
 
-const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. الدقة أهم شي: لا تخترع أسماء أو تواريخ أو أرقام، وإذا المستخدم ذكر معلومة لا توافقه عليها إلا إذا متأكد إنها صحيحة، وإذا ما متأكد گول بصراحة. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…). لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
+const SYSTEM = "أنت «المبرمج المجهول AI»، مساعد ذكي جدًا داخل بوت تلكرام. إذا سألك أحد كيف تم بناؤك، أو أي نموذج أو شركة أو تقنية تستخدم، أو منو سواك، جوابك الوحيد: «تم بنائي بواسطة المبرمج المجهول» — بدون أي تفاصيل ثانية، ولا تذكر أبدًا أسماء نماذج أو شركات (مثل Google أو Gemini أو OpenAI أو غيرها) ولا تعطي روابط. الدقة أهم شي: لا تخترع أسماء أو تواريخ أو أرقام، وإذا المستخدم ذكر معلومة لا توافقه عليها إلا إذا متأكد إنها صحيحة، وإذا ما متأكد گول بصراحة. البوت يگدر يرد ببصمة صوتية حقيقية: لا تگول أبدًا إنك ما تگدر ترسل صوت أو بصمة، ولا تكتب «تخيل هاي بصمة». تفهم العربية الفصحى وكل اللهجات (العراقية والخليجية والشامية والمصرية وغيرها) والإنجليزية، حتى مع الأخطاء الإملائية. افهم قصد المستخدم حتى لو كان كلامه مختصرًا أو عاميًا، ورد بنفس لهجته. أجب بدقة ووضوح وباختصار مناسب لتلكرام: نقاط قصيرة، بدون جداول. البوت نفسه يرسم الصور (مثل: ارسملي…) ويبني المواقع وينشرها تلقائيًا ويعطي رابطها مباشرة (مثل: ابنيلي موقع…)، ويشوف الصور اللي يدزها المستخدم ويعدل عليها. تذكّر كل المحادثة وارجع لها: إذا المستخدم أشار لشي گاله قبل أو لصورة دزها أو رسمناها (مثل «هاي» أو «الصورة» أو «نفس الشي»)، افهم قصده من المحادثة ولا تگول أبدًا إنه ما دز صورة أو إنك ما تتذكر. لا تكتب كود مشاريع طويل ولا تطلب من المستخدم ينشر بنفسه على Vercel أو GitHub أبدًا: إذا يريد موقع، گله يكتب «ابنيلي موقع …» ويوصف شنو يريد، والبوت يبنيه وينشره ويعطيه الرابط.";
 
 // ───── Telegram API ─────
 async function tg(method, body) {
@@ -58,6 +59,7 @@ async function sendPhoto(chat_id, buffer, mime, caption, extra = {}) {
   const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: "POST", body: fd });
   const j = await r.json().catch(() => ({}));
   if (!j.ok) throw new Error(j.description || "sendPhoto failed");
+  return j.result;
 }
 
 async function sendVoice(chat_id, buffer, caption) {
@@ -84,6 +86,9 @@ async function ensureTables() {
   await sql`CREATE TABLE IF NOT EXISTS tg_updates (update_id bigint PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now())`;
   await sql`CREATE TABLE IF NOT EXISTS tg_chats (chat_id bigint PRIMARY KEY, user_id text NOT NULL, history jsonb NOT NULL DEFAULT '[]'::jsonb,
             site_slug text, updated_at timestamptz NOT NULL DEFAULT now())`;
+  // آخر صورة بالمحادثة (دزها المستخدم أو رسمناها) + آخر شي اشتغلنا عليه (صورة لو موقع) حتى نفهم «عدّل/شيل/غيّر»
+  await sql`ALTER TABLE tg_chats ADD COLUMN IF NOT EXISTS last_image_id text`;
+  await sql`ALTER TABLE tg_chats ADD COLUMN IF NOT EXISTS last_kind text`;
   tablesReady = true;
 }
 
@@ -103,12 +108,37 @@ async function chatState(chat_id, user_id) {
   return s;
 }
 
+// ───── الذاكرة ─────
+const MEMORY = 40; // آخر 40 رسالة (20 سؤال وجواب) يتذكرها البوت، وفيها الصور والمواقع اللي سواها
+const recent = (state) => (Array.isArray(state.history) ? state.history.slice(-MEMORY) : []);
+async function remember(chat_id, state, items, extra = {}) {
+  const next = [...recent(state), ...items.map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }))].slice(-MEMORY);
+  state.history = next;
+  await sql`UPDATE tg_chats SET history = ${JSON.stringify(next)}::jsonb,
+            last_image_id = COALESCE(${extra.image ?? null}, last_image_id), last_kind = COALESCE(${extra.kind ?? null}, last_kind)
+            WHERE chat_id = ${chat_id}`;
+  if (extra.image) state.last_image_id = extra.image;
+  if (extra.kind) state.last_kind = extra.kind;
+}
+const SITE_BASE = () => (process.env.SITE_URL || "https://almajhool-ai.vercel.app").replace(/\/$/, "");
+async function storeImage(user, bytes, mime, prompt, model, w = null, h = null) {
+  const id = randomId(12);
+  await sql`INSERT INTO images (id, user_id, prompt, model, mime, data, width, height)
+            VALUES (${id}, ${user.id}, ${String(prompt).slice(0, 2000)}, ${model}, ${mime}, ${bytes}, ${w}, ${h})`;
+  return id;
+}
+async function loadImage(id) {
+  if (!id) return null;
+  const [row] = await sql`SELECT id, mime, data, prompt FROM images WHERE id = ${id}`;
+  return row ? { id: row.id, mime: row.mime, bytes: Buffer.from(row.data), prompt: row.prompt } : null;
+}
+
 // ───── القدرات ─────
 async function doChat(chat_id, user, state, text, { voice, provider = "auto" } = {}) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.tokens >= user.daily_tokens) return send(chat_id, "وصلت حدك اليومي من التوكنات. يتجدد غدًا 🌙");
   await action(chat_id, voice ? "record_voice" : "typing");
-  const history = Array.isArray(state.history) ? state.history.slice(-12) : [];
+  const history = recent(state);
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
   const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت: رد بـ${DIALECT_NAMES[voice] || DIALECT_NAMES.iraqi} دائمًا (حتى لو هو حچى بلهجة ثانية)، بكلام طبيعي محكي وقصير (أقل من 80 كلمة)، بدون نقاط أو رموز أو إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
@@ -153,12 +183,11 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     } catch (e) { console.error("voice reply", e.message); }
   }
   if (!spoken) await sendLong(chat_id, answer);
-  const next = [...history, { role: "user", content: text.slice(0, 4000) }, { role: "assistant", content: answer.slice(0, 4000) }].slice(-12);
-  await sql`UPDATE tg_chats SET history = ${JSON.stringify(next)}::jsonb WHERE chat_id = ${chat_id}`;
+  await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: answer }]);
   await logUsage(user.id, "chat", estTokens(JSON.stringify(messages)) + estTokens(answer), "telegram", null);
 }
 
-async function doImage(chat_id, user, text) {
+async function doImage(chat_id, user, text, state) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.images >= user.daily_images) return send(chat_id, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا 🌙`);
   const status = await send(chat_id, "🎨 جاري رسم الصورة… (تاخذ تقريبًا نص دقيقة)");
@@ -175,13 +204,57 @@ async function doImage(chat_id, user, text) {
     try { bytes = await applyOverlaysServer(r.data.image, r.overlays); mime = "image/png"; }
     catch (e) { console.error("overlay", e.message); }
   }
-  const id = randomId(12);
-  await sql`INSERT INTO images (id, user_id, prompt, model, mime, data, width, height)
-            VALUES (${id}, ${user.id}, ${text.slice(0, 2000)}, ${r.data.model || "flux"}, ${mime}, ${bytes}, ${r.w}, ${r.h})`;
+  const id = await storeImage(user, bytes, mime, text, r.data.model || "flux", r.w, r.h);
   await logUsage(user.id, "image", 0, r.data.provider || "workers-ai", r.data.model || "flux");
   const caption = `تفضل 🎨${fixedText ? `\n✍️ كتبت: ${r.overlays.map((o) => o.text).join("، ")}` : ""}`;
   await sendPhoto(chat_id, bytes, mime, caption);
   if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
+  if (state) await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: `[رسمت الصورة المطلوبة ودزيتها: ${r.english.slice(0, 300)}]` }], { image: id, kind: "image" });
+}
+
+// ───── الصور: سؤال عنها أو تعديل عليها ─────
+async function doVision(chat_id, user, state, img, text, { voice } = {}) {
+  await action(chat_id, voice ? "record_voice" : "typing");
+  const history = recent(state);
+  let answer;
+  try { answer = await directText(visionMessages(SYSTEM, history, text, img.bytes, img.mime), { provider: "gemini", max_tokens: 1500, timeout: 45_000 }); }
+  catch (e) { console.error("vision", e.message); return send(chat_id, "ما گدرت أشوف الصورة هسه، جرّب بعد شوية 🙏"); }
+  let spoken = false;
+  if (voice) {
+    try { const { audio } = await speak(answer, voice); await sendVoice(chat_id, audio, cleanText(answer).slice(0, 1000)); spoken = true; }
+    catch (e) { console.error("voice reply", e.message); }
+  }
+  if (!spoken) await sendLong(chat_id, answer);
+  await remember(chat_id, state, [{ role: "user", content: `[عن الصورة] ${text || "شنو بهاي الصورة؟"}` }, { role: "assistant", content: answer }], { kind: "image" });
+}
+
+async function doImageEdit(chat_id, user, state, img, request, instruction) {
+  const usage = await usageToday(user.id);
+  if (user.role !== "admin" && usage.images >= user.daily_images) return send(chat_id, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا 🌙`);
+  const status = await send(chat_id, "🪄 دا أعدّل على الصورة…");
+  const tick = setInterval(() => action(chat_id, "upload_photo").catch(() => {}), 4500); action(chat_id, "upload_photo");
+  try {
+    const how = instruction || request;
+    let out, redrawn = false;
+    try { out = await editImage({ bytes: img.bytes, mime: img.mime, instruction: how, publicUrl: `${SITE_BASE()}/i/${img.id}` }); }
+    catch (e) {
+      console.error("image edit", e.message);
+      // ما اكو محرك تعديل متاح هسه: نرسم نسخة جديدة قريبة من الصورة بالتعديل المطلوب
+      const prompt = await redrawPrompt({ bytes: img.bytes, mime: img.mime, instruction: how });
+      const r = await generateImage({ prompt });
+      out = { bytes: r.bytes, mime: r.mime, provider: r.data.provider || "redraw" };
+      redrawn = true;
+    }
+    const id = await storeImage(user, out.bytes, out.mime, `[تعديل] ${request}`, out.provider);
+    await logUsage(user.id, "image", 0, out.provider, out.provider);
+    await sendPhoto(chat_id, out.bytes, out.mime, redrawn ? "تفضل 🎨 (رسمتها من جديد قريبة من صورتك ويا التعديل اللي طلبته)" : "تفضل، عدّلتها ✨");
+    if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
+    await remember(chat_id, state, [{ role: "user", content: `[طلب تعديل على الصورة] ${request}` },
+      { role: "assistant", content: `[عدّلت الصورة ودزيتها${redrawn ? " (نسخة مرسومة من جديد)" : ""}: ${how.slice(0, 300)}]` }], { image: id, kind: "image" });
+  } catch (e) {
+    console.error("image edit/redraw", e.message);
+    if (status) await edit(chat_id, status.message_id, "ما گدرت أعدّل الصورة هسه، جرّب مرة ثانية بعد شوية 🙏");
+  } finally { clearInterval(tick); }
 }
 
 async function doSite(chat_id, user, state, text, kind, isEdit) {
@@ -218,6 +291,7 @@ async function doSite(chat_id, user, state, text, kind, isEdit) {
   const msg = `${current ? "✅ عدّلت موقعك ونشرت التحديث على نفس الرابط!" : "✅ موقعك جاهز ومنشور!"}\n${url}\n\nاكتب أي تعديل هنا، مثل: «غيّر اللون للأزرق» أو «ضيف قسم آراء العملاء».\nوإذا تريد موقع جديد: /new`;
   if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
   await send(chat_id, msg);
+  await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: `[${current ? "عدّلت الموقع" : "بنيت الموقع ونشرته"}: ${url}]` }], { kind: "site" });
 }
 
 async function queueVideo(msg, video) {
@@ -257,6 +331,21 @@ async function handle(update) {
   try { return await handleMessage(update); } finally { clearInterval(tick); }
 }
 
+// الصورة بآخر 6 رسائل (دزها، رسمناها، عدلناها، أو سألنا عنها) = المستخدم بعده يحچي عليها
+const imageIsRecent = (state) => state.last_kind === "image" &&
+  recent(state).slice(-6).some((m) => /^\[(دزيت صورة|رسمت|عدّلت الصورة|عن الصورة|طلب تعديل على الصورة)/.test(String(m.content)));
+
+/** يرجع true إذا تعامل وية الطلب (تعديل/سؤال/صورة جديدة)، وfalse إذا الكلام مو عن الصورة */
+async function imageFollowup(chat_id, user, state, img, text, { voice, fromPhoto } = {}) {
+  let plan;
+  try { plan = await planImageFollowup({ bytes: img.bytes, mime: img.mime, history: recent(state), text }); }
+  catch (e) { console.error("image plan", e.message); plan = { action: fromPhoto ? "ask" : "other" }; }
+  if (plan.action === "edit") { await doImageEdit(chat_id, user, state, img, text, plan.instruction); return true; }
+  if (plan.action === "ask" || (fromPhoto && plan.action === "other")) { await doVision(chat_id, user, state, img, text, { voice }); return true; }
+  if (plan.action === "new") { await doImage(chat_id, user, text, state); return true; }
+  return false;
+}
+
 async function handleMessage(update) {
   const msg = update.message;
   if (!msg?.from || msg.from.is_bot) return;
@@ -271,7 +360,10 @@ async function handleMessage(update) {
     ? (msg.video || msg.animation || (msg.document && /^video\//.test(msg.document.mime_type || "") ? msg.document : null)) : null;
   if (video) return queueVideo(msg, video);
   const media = msg.chat.type === "private" ? (msg.voice || msg.audio || msg.video_note) : null;
-  if (!text && !media) return send(chat_id, "اكتب طلبك أو دز بصمة 🎙");
+  // صورة دزها المستخدم (كصورة أو كملف)
+  const photo = msg.photo?.length ? msg.photo[msg.photo.length - 1]
+    : (msg.document && /^image\//.test(msg.document.mime_type || "") ? msg.document : null);
+  if (!text && !media && !photo) return send(chat_id, "اكتب طلبك أو دز بصمة 🎙");
   const user = await tgUser(msg.from);
   if (user.banned) return send(chat_id, "تم إيقاف حسابك من قبل الإدارة.");
   const state = await chatState(chat_id, user.id);
@@ -289,6 +381,23 @@ async function handleMessage(update) {
     catch (e) { console.error(e.message); return send(chat_id, "ما گدرت أسمع البصمة زين، دزها مرة ثانية أو اكتب طلبك 🙏"); }
     text = heard.transcript; voice = "iraqi"; // الرد بالبصمة دائمًا بالعراقي (هذا اللي يريده صاحب البوت)، مهما كانت لهجة المتكلم
   }
+  if (photo) { // نحفظ الصورة كآخر صورة بالمحادثة، وبعدها أي «شيل/غيّر/شنو هاي» يرجع إلها
+    if ((photo.file_size || 0) > 20 * 1024 * 1024) return send(chat_id, "الصورة كبيرة كلش (أكثر من 20 ميگا)، دزها كصورة عادية مو كملف 🙏");
+    await action(chat_id, "typing");
+    const file = await tg("getFile", { file_id: photo.file_id });
+    if (!file?.file_path) return send(chat_id, "ما گدرت أحمّل الصورة، دزها مرة ثانية 🙏");
+    const r = await fetch(`https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`);
+    const bytes = Buffer.from(await r.arrayBuffer());
+    const mime = msg.photo ? "image/jpeg" : (photo.mime_type || "image/jpeg");
+    const id = await storeImage(user, bytes, mime, "[صورة من المستخدم]", "upload", photo.width || null, photo.height || null);
+    if (!text) {
+      const reply = "وصلتني الصورة 👌 شتريد أسوي بيها؟\nتگدر تگلي مثلًا: شيل شي منها، غيّر الخلفية، ضيف شي، خليها أوضح… أو اسألني عنها.";
+      await send(chat_id, reply);
+      return remember(chat_id, state, [{ role: "user", content: "[دزيت صورة]" }, { role: "assistant", content: reply }], { image: id, kind: "image" });
+    }
+    await remember(chat_id, state, [{ role: "user", content: "[دزيت صورة]" }], { image: id, kind: "image" });
+    return imageFollowup(chat_id, user, state, { id, bytes, mime }, text, { voice: null, fromPhoto: true });
+  }
   if (/^\/(start|help)\b/i.test(text)) return send(chat_id, WELCOME);
   let provider = "auto";
   if (GPT_REQ.test(text) && text.replace(GPT_REQ, "").trim().length > 2) { provider = [...GPT_IDS, "gemini"]; text = text.replace(GPT_REQ, "").trim(); }
@@ -297,8 +406,16 @@ async function handleMessage(update) {
     return send(chat_id, ABOUT);
   }
   if (/^\/new\b/i.test(text)) {
-    await sql`UPDATE tg_chats SET history = '[]'::jsonb, site_slug = NULL WHERE chat_id = ${chat_id}`;
+    await sql`UPDATE tg_chats SET history = '[]'::jsonb, site_slug = NULL, last_image_id = NULL, last_kind = NULL WHERE chat_id = ${chat_id}`;
     return send(chat_id, "✨ بدينا من جديد. اكتب طلبك.");
+  }
+  // آخر شي اشتغلنا عليه صورة (أو المستخدم ذكر «الصورة»): نشوف الصورة ويا المحادثة ونفهم شيريد منها
+  if (state.last_image_id && provider === "auto" && (imageIsRecent(state) || /(ال)?صور(ة|ه)|بالصور|image|photo/i.test(text))) {
+    const img = await loadImage(state.last_image_id);
+    if (img) {
+      const handled = await imageFollowup(chat_id, user, state, img, text, { voice });
+      if (handled) return;
+    }
   }
   const intent = detectIntent(text, !!state.site_slug);
   if (intent.type === "lovable") { // بالبوت نبنيه وننشره مباشرة بدل ما نحوله لمنصة ثانية
@@ -311,7 +428,7 @@ async function handleMessage(update) {
       .map((m) => ({ m, i: detectIntent(m.content) })).find((x) => x.i.type === "site");
     if (prev) return doSite(chat_id, user, state, prev.m.content, prev.i.kind, false);
   }
-  if (intent.type === "image") return doImage(chat_id, user, text);
+  if (intent.type === "image") return doImage(chat_id, user, text, state);
   if (intent.type === "site") return doSite(chat_id, user, state, text, intent.kind, false);
   if (intent.type === "edit") return doSite(chat_id, user, state, text, null, true);
   if (!voice && WANTS_VOICE.test(text)) voice = "iraqi"; // طلب بصمة بالكتابة: نرد بصوت عراقي

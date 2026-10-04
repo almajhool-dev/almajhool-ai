@@ -1,0 +1,58 @@
+name: Image follow-up smoke test
+
+# صورة حقيقية + محادثة: البوت يفهم «شيل/غيّر/شنو هاي» من المحادثة، يجاوب عن الصورة، ويعدّل (أو يرسم نسخة قريبة)
+on:
+  push:
+    paths: ["web/api/_imageedit.js", ".github/workflows/image-edit-smoke.yml"]
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DATABASE_URL: postgres://unused:unused@localhost/unused
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: curl -fsSL -A "Mozilla/5.0" -o web/cat.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg"
+      - name: Understands what the user means, answers about the image, edits it
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import fs from 'fs';
+            import { planImageFollowup, editImage, redrawPrompt, visionMessages } from './api/_imageedit.js';
+            import { directText } from './api/_direct.js';
+            const bytes = fs.readFileSync('cat.jpg'), mime = 'image/jpeg';
+            const history = [{ role: 'user', content: '[دزيت صورة]' }, { role: 'assistant', content: 'وصلتني الصورة 👌 شتريد أسوي بيها؟' },
+                             { role: 'user', content: '[طلب تعديل على الصورة] خلي الخلفية زرگة' }, { role: 'assistant', content: '[عدّلت الصورة ودزيتها: background changed to blue]' }];
+            const cases = [['شيلي هاي الشغلة الحمرة اللي فوگ', 'edit'], ['شنو نوع هالحيوان؟', 'ask'], ['خلي عيونه زرگ', 'edit'], ['ارسملي سيارة رياضية حمرة جديدة', 'new'], ['شلونك اليوم؟', 'other'], ['اكتب عليها اسم بغداد', 'edit']];
+            let bad = 0;
+            for (const [text, want] of cases) {
+              const s = Date.now();
+              const p = await planImageFollowup({ bytes, mime, history, text });
+              const ok = p.action === want; if (!ok) bad++;
+              console.log(ok ? 'PLAN_OK  ' : 'PLAN_DIFF', (Date.now() - s) + 'ms', '|', text, '=>', p.action, '|', p.instruction.slice(0, 160));
+            }
+            const v = await directText(visionMessages('رد باللهجة العراقية وباختصار.', history, 'شنو بهاي الصورة؟', bytes, mime), { provider: 'gemini', max_tokens: 300 });
+            console.log('VISION |', v.replace(/\s+/g, ' ').slice(0, 200));
+            try { const e = await editImage({ bytes, mime, instruction: 'Remove the red cable at the top of the image. Keep everything else identical.' }); console.log('EDIT_OK', e.provider, e.bytes.length); fs.writeFileSync('edited.png', e.bytes); }
+            catch (e) { console.log('EDIT_UNAVAILABLE (falls back to redraw)', e.message.slice(0, 600));
+              const p = await redrawPrompt({ bytes, mime, instruction: 'remove the red cable' }); console.log('REDRAW_PROMPT |', p.replace(/\s+/g, ' ').slice(0, 300)); }
+            if (bad > 1) process.exitCode = 1;"
+      - name: Show the edited image (branches other than main)
+        if: github.ref != 'refs/heads/main'
+        working-directory: web
+        run: |
+          [ -f edited.png ] || exit 0
+          mkdir -p /tmp/pv && cp cat.jpg edited.png /tmp/pv/ && cd /tmp/pv && git init -q && git checkout -qb ci-image-preview
+          git config user.name preview && git config user.email preview@users.noreply.github.com && git add . && git commit -qm preview
+          git push -fq "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-image-preview
