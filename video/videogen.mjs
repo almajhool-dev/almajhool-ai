@@ -48,7 +48,7 @@ async function motionVideo() {
 let userImage = null, imageDesc = "";
 async function loadUserImage() {
   if (!job.image_url) return;
-  const r = await fetch(job.image_url, { signal: AbortSignal.timeout(30_000) });
+  const r = await fetch(job.image_url, { headers: { "User-Agent": "Mozilla/5.0 (almajhool-ai video bot)" }, signal: AbortSignal.timeout(30_000) });
   const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0];
   if (!r.ok || !ct.startsWith("image/")) { console.log("user image", r.status); return; }
   userImage = `data:${ct};base64,${Buffer.from(await r.arrayBuffer()).toString("base64")}`;
