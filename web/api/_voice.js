@@ -4,6 +4,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { Mp3Encoder } from "@breezystack/lamejs";
+// مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
+{
+  const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
+    .flatMap((k) => String(k || "").split(/[\s,]+/)).filter(Boolean);
+  if (all.length) process.env.GEMINI_API_KEY = [...new Set(all)].join(",");
+}
+
 
 const GEMINI_KEYS = () => String(process.env.GEMINI_API_KEY || "").split(/[\s,]+/).filter(Boolean);
 const LISTEN_MODELS = () => {
