@@ -46,6 +46,17 @@ jobs:
                 console.log('PROVIDER', p.id, r.status, (Date.now() - s) + 'ms', r.ok ? (j.choices?.[0]?.message?.content || '').slice(0, 120).replace(/\\n/g, ' ') : JSON.stringify(j).slice(0, 160));
               } catch (e) { console.log('PROVIDER', p.id, 'error', e.message); }
             }"
+      - name: Mistral details (limits per model)
+        continue-on-error: true
+        run: |
+          [ -n "$MISTRAL_API_KEY" ] || exit 0
+          echo "models: $(curl -sS -H "Authorization: Bearer $MISTRAL_API_KEY" https://api.mistral.ai/v1/models | jq -r '[.data[]?.id] | length') available"
+          for M in mistral-small-latest mistral-medium-latest open-mistral-nemo ministral-8b-latest; do
+            curl -sS -D /tmp/h -o /tmp/b -H "Authorization: Bearer $MISTRAL_API_KEY" -H "Content-Type: application/json" \
+              https://api.mistral.ai/v1/chat/completions -d "{\"model\":\"$M\",\"max_tokens\":30,\"messages\":[{\"role\":\"user\",\"content\":\"قل هلو بالعراقي\"}]}"
+            echo "MISTRAL $M $(head -1 /tmp/h | tr -d '\r') | $(grep -i ratelimit /tmp/h | tr -d '\r' | tr '\n' ' ') | $(jq -c '.choices[0].message.content // .message // .' /tmp/b | head -c 200)"
+            sleep 2
+          done
       - name: Quick reply speed (voice notes and small talk)
         continue-on-error: true
         working-directory: web
