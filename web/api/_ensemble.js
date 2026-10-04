@@ -14,7 +14,7 @@ async function gatewayDraft(messages, max_tokens) {
 }
 
 /** يرجع مسودات من كل المصادر بالتوازي: [{ text, by }] */
-export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1500, enough = 3, grace = 4000 } = {}) {
+export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1500, enough = 3, grace = 2000 } = {}) {
   const jobs = [];
   for (const p of directConfigured()) {
     // Gemini: مسودته من النموذج الخفيف حتى نخلي حصة القوي للجواب النهائي
@@ -47,7 +47,7 @@ export async function collectDrafts(messages, { timeout = 22_000, max_tokens = 1
     let searchOk = false;
     const maybeGrace = () => {
       const need = searchOk ? Math.min(enough, 2) : enough;
-      if (got.length >= need && !graceTimer && searchDone) graceTimer = setTimeout(finish, searchOk ? 2500 : grace);
+      if (got.length >= need && !graceTimer && searchDone) graceTimer = setTimeout(finish, searchOk ? 1500 : grace);
     };
     searchJob?.then(() => { searchOk = true; }, () => {}).finally(() => { searchDone = true; maybeGrace(); });
     for (const j of jobs) {

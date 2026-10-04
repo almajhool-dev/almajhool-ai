@@ -3,7 +3,7 @@
 // يحتاج سر واحد بـ GitHub: TELEGRAM_BOT_TOKEN — والنشر التلقائي يربط الـ webhook وحده.
 import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
-import { GPT_IDS, directConfigured, directText } from "./_direct.js";
+import { DIRECT, GPT_IDS, directConfigured, directText } from "./_direct.js";
 import { ensembleAnswer } from "./_ensemble.js";
 import { needsSearch, searchAnswer } from "./_search.js";
 import { ImageError, generateImage } from "./_imagegen.js";
@@ -115,9 +115,20 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   let answer = "";
   try {
     if (!directConfigured().length) throw new Error("no direct");
-    if (provider === "auto") {
+    const factual = needsSearch(text);
+    // رد سريع: البصمة (لازم تكون فورية) والسوالف القصيرة — نموذج سريع واحد بدل انتظار كل النماذج
+    const quick = provider === "auto" && !factual && (voice || (text.length < 60 && !/\n/.test(text)));
+    if (quick) {
+      try { answer = await directText(messages, { max_tokens: voice ? 600 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
+      catch (e) { console.error("quick", e.message); }
+    }
+    // سؤال عن حقيقة بالبصمة: نجاوب من البحث مباشرة (أسرع من تجميع كل النماذج)
+    if (!answer && voice && factual && provider === "auto") {
+      try { answer = (await searchAnswer(text, { history })).text; } catch (e) { console.error("search", e.message); }
+    }
+    if (!answer && provider === "auto") {
       // كل النماذج المتصلة تجاوب بنفس اللحظة، وبعدها نطلع جواب واحد قوي منهم
-      try { answer = (await ensembleAnswer(messages, { draftTimeout: voice ? 15_000 : 22_000 })).text; }
+      try { answer = (await ensembleAnswer(messages, { draftTimeout: voice ? 12_000 : 15_000 })).text; }
       catch (e) { console.error("ensemble", e.message); }
     }
     // إذا تجميع النماذج ما نجح وسؤاله عن حقيقة: نجاوب من بحث Google مباشرة

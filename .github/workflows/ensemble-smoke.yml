@@ -3,7 +3,7 @@ name: All models together smoke test
 # يجرّب «كل النماذج مرة وحدة» من شبكة حقيقية: كل مصدر يجاوب، وبعدها جواب واحد نهائي
 on:
   push:
-    paths: ["web/api/_ensemble.js", "web/api/_search.js"]
+    paths: ["web/api/_ensemble.js", "web/api/_search.js", "web/api/telegram.js", ".github/workflows/ensemble-smoke.yml"]
   workflow_dispatch:
 
 jobs:
@@ -27,6 +27,22 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --no-audit --no-fund
         working-directory: web
+      - name: Quick reply speed (voice notes and small talk)
+        continue-on-error: true
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { DIRECT, directText } from './api/_direct.js';
+            import { speak } from './api/_voice.js';
+            const lite = DIRECT.find((p) => p.id === 'gemini')?.lite;
+            for (const q of ['هلو شلونك حبيبي', 'شنو أحسن أكلة عراقية؟', 'اكتبلي بيت شعر عن بغداد']) {
+              const s = Date.now();
+              try {
+                const a = await directText([{ role: 'system', content: 'رد باللهجة العراقية بكلام محكي قصير.' }, { role: 'user', content: q }], { max_tokens: 600, timeout: 15000, prefer: lite });
+                const t = Date.now(); const v = await speak(a, 'iraqi');
+                console.log('QUICK', (t - s) + 'ms text +', (Date.now() - t) + 'ms voice (' + v.voice + ') |', q, '=>', a.replace(/\s+/g, ' ').slice(0, 120));
+              } catch (e) { console.log('QUICK_FAIL', q, e.message.slice(0, 200)); }
+            }"
       - name: Every connected model answers, then one final answer
         # الحصص المجانية (مثل 50 طلب/يوم لـ OpenRouter) ممكن تخلص من كثر التجارب — ما نفشّل التشغيل بسببها
         continue-on-error: true
