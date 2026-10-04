@@ -348,7 +348,7 @@ export async function preciseEdit({ bytes, mime, plan }) {
 // 2) لكل الصور: Real-ESRGAN يوضّح كل شي (نص، شعارات، أشياء، مناظر) ويكبّر ×4 — داخل سيرفرنا، ما يعتمد على خدمة خارجية
 async function hasFaces(bytes, mime) {
   const out = await directText([{ role: "user", content: [
-    { type: "text", text: "Does this image contain a clearly visible real human face (a photo of a person, not a logo, icon or drawing)? Answer only yes or no." },
+    { type: "text", text: "Does this image contain a clearly visible human face (a photo of a person or a realistic portrait painting; not a logo, icon, cartoon or emoji)? Answer only yes or no." },
     { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } },
   ] }], { provider: "gemini", prefer: LITE(), max_tokens: 10, timeout: 15_000 });
   return /yes|نعم/i.test(String(out));
