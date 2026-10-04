@@ -22,6 +22,7 @@ New user message: "${text || "(sent the image with no text)"}"
 Decide what the user wants, using the conversation and the image (they write in Iraqi Arabic; "هاي/هذا/الشغلة" refer to things in this image):
 - "edit": change this same image (remove/add/replace/recolor something, change background, write text on it, fix it, make it like X…)
 - "enhance": make this same image clearer / sharper / higher resolution / restore an old or blurry photo (وضحها، ارفع دقتها، حسّنها، صفيها، مثل ريميني…)
+- "video": make a video / clip / animation from this image (سوي مقطع منها، حوّلها فيديو، حركها…)
 - "ask": a question or request about the image's content (what is this, describe, read the text, is it real…)
 - "new": a completely new, unrelated image
 - "other": not about the image — including when the user refers to something said earlier in the chat rather than to the image (e.g. «تذكر شگتلك قبل شوية», «لا مو عالصورة»), small talk, or a new topic
@@ -31,12 +32,12 @@ For "edit", also classify the kind of edit:
 - "replace_text": change some written text in the image into other text
 - "add_text": write new text on the image
 - "other": anything else (recolor, change background, add an object, style…)
-Return ONLY JSON: {"action":"edit|enhance|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
+Return ONLY JSON: {"action":"edit|enhance|video|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
   const out = await directText([{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } }] }],
     { provider: "gemini", prefer: LITE(), max_tokens: 400, timeout: 25_000 });
   let j = {};
   try { j = JSON.parse((String(out).match(/\{[\s\S]*\}/) || ["{}"])[0]); } catch { /* نرجع other */ }
-  const action = ["edit", "enhance", "ask", "new", "other"].includes(j.action) ? j.action : "other";
+  const action = ["edit", "enhance", "video", "ask", "new", "other"].includes(j.action) ? j.action : "other";
   const op = ["remove", "replace_text", "add_text"].includes(j.op) ? j.op : "other";
   return { action, op, target: String(j.target || "").slice(0, 400), newText: String(j.new_text || "").slice(0, 200), instruction: String(j.instruction || "").slice(0, 800) };
 }
@@ -366,4 +367,24 @@ export async function enhanceImage({ bytes, mime }) {
   const up = await upscale4x(base.bytes);
   used.push("real-esrgan");
   return { ...up, provider: used.join("+") };
+}
+
+// ───────── فهم الرسائل القصيرة من المحادثة («حوله»، «سويها»، «اي سويه»…) ─────────
+/** يرجع { action: "video"|"image"|"site"|"chat", request: "<الطلب كامل وواضح>" } */
+export async function routeFollowup({ history = [], text }) {
+  const convo = history.slice(-8).map((m) => `${m.role === "user" ? "المستخدم" : "البوت"}: ${String(m.content).slice(0, 300)}`).join("\n");
+  const out = await directText([{ role: "user", content: `محادثة بوت تلكرام (البوت يگدر: يدردش، يرسم صور، يسوي مقاطع فيديو بالذكاء الاصطناعي، يبني مواقع):
+${convo}
+
+رسالة المستخدم الجديدة: «${text}»
+
+إذا الرسالة موافقة أو طلب تنفيذ لشي انعرض أو انطلب قبل بالمحادثة (مثل «حوله»، «سويه»، «اي»، «يلا»، «تمام سويها»)، حدد شنو المطلوب ينسوى.
+رجّع JSON فقط: {"action":"video|image|site|chat","request":"<الطلب كامل وواضح بالعربي كأن المستخدم كتبه من جديد، مثل: سويلي فيديو لأسد يركض بالصحرا>"}
+- video: يريد مقطع فيديو ينسوى
+- image: يريد صورة جديدة تترسم
+- site: يريد موقع ينبني
+- chat: غير هذا (سؤال، سوالف، شكر، رأي…)` }], { provider: "gemini", prefer: LITE(), max_tokens: 200, timeout: 15_000 });
+  const j = parseJson(out, {});
+  const action = ["video", "image", "site"].includes(j.action) ? j.action : "chat";
+  return { action, request: String(j.request || text).slice(0, 600) };
 }

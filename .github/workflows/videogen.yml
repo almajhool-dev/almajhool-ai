@@ -1,29 +1,48 @@
 name: AI video generation (Telegram bot)
 
-# «سويلي فيديو…» بالبوت: البوت يجهز الوصف ويبعثه هنا، ونماذج الفيديو المجانية تسوي المقطع ويوصل للمستخدم بتلكرام
+# «سويلي فيديو…» بالبوت: البوت يجهز الطلب ويبعثه هنا، ونسوي المقطع ويوصل للمستخدم بتلكرام
 on:
   repository_dispatch:
     types: [videogen]
   workflow_dispatch:
     inputs:
-      prompt: { description: "English prompt (test)", required: false }
+      prompt: { description: "طلب تجريبي", required: false }
+  push:
+    branches-ignore: [main]
+    paths: ["video/videogen.mjs", "web/api/_videogen.js", ".github/workflows/videogen.yml"]
 
 jobs:
   generate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     env:
       DATABASE_URL: postgres://unused:unused@localhost/unused
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       JOB: ${{ toJSON(github.event.client_payload) }}
       TEST_PROMPT: ${{ github.event.inputs.prompt }}
+      TEST_IMAGE_URL: ${{ github.event_name == 'push' && 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/500px-Cat03.jpg' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Tools
+        timeout-minutes: 12
+        run: |
+          bash video/tools.sh
+          cd web && npm ci --no-audit --no-fund --ignore-scripts
       - name: Make the video and send it
         run: cp video/videogen.mjs web/ && cd web && node videogen.mjs
-      - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch'
-        with: { name: generated, path: web/generated.mp4, retention-days: 2, if-no-files-found: ignore }
+      - name: Show a preview (test runs on branches)
+        if: github.event_name == 'push'
+        run: |
+          cd web && [ -f generated.mp4 ] || exit 1
+          ffprobe -v error -show_entries stream=codec_type,width,height,duration -of compact generated.mp4
+          mkdir -p /tmp/pv && ffmpeg -v error -y -i generated.mp4 -vf "fps=0.5,scale=270:-1,tile=5x2" -frames:v 1 /tmp/pv/frames.jpg
+          cd /tmp/pv && git init -q && git checkout -qb ci-video-preview && git config user.name preview && git config user.email preview@users.noreply.github.com
+          git add . && git commit -qm preview && git push -fq "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-video-preview
