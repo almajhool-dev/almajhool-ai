@@ -29,7 +29,7 @@ For "edit", also classify the kind of edit:
 - "replace_text": change some written text in the image into other text
 - "add_text": write new text on the image
 - "other": anything else (recolor, change background, add an object, style…)
-Return ONLY JSON: {"action":"edit|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where to put the new text>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
+Return ONLY JSON: {"action":"edit|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
   const out = await directText([{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } }] }],
     { provider: "gemini", prefer: LITE(), max_tokens: 400, timeout: 25_000 });
   let j = {};
@@ -305,8 +305,17 @@ export async function preciseEdit({ bytes, mime, plan }) {
   if (!boxes.length) return null;
   const canvas = createCanvas(w, h), ctx = canvas.getContext("2d");
   ctx.drawImage(im, 0, 0);
-  if (plan.op === "add_text") boxes = boxes.slice(0, 1);
-  else if (!eraseRegions(ctx, w, h, boxes)) return null;
+  if (plan.op === "add_text") {
+    // كتابة جديدة: مربع مناسب الحجم، ولون يبين فوق الخلفية (أسود فوق الفاتح، أبيض فوق الغامق)
+    const b = boxes[0];
+    const minH = Math.round(h * 0.07), cy = (b.y0 + b.y1) / 2;
+    if (b.y1 - b.y0 < minH) { b.y0 = Math.max(0, Math.round(cy - minH / 2)); b.y1 = Math.min(h, b.y0 + minH); }
+    if (b.x1 - b.x0 < w * 0.3) { const cx = (b.x0 + b.x1) / 2; b.x0 = Math.max(0, Math.round(cx - w * 0.2)); b.x1 = Math.min(w, Math.round(cx + w * 0.2)); }
+    const px = ctx.getImageData(b.x0, b.y0, Math.max(1, b.x1 - b.x0), Math.max(1, b.y1 - b.y0)).data;
+    let lum = 0; for (let i = 0; i < px.length; i += 4) lum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    b.color = lum / (px.length / 4) > 140 ? "#111111" : "#ffffff";
+    boxes = [b];
+  } else if (!eraseRegions(ctx, w, h, boxes)) return null;
   if (plan.op !== "remove") for (const b of boxes) drawText(ctx, plan.newText, b, b.color);
   return { bytes: canvas.toBuffer("image/png"), mime: "image/png", provider: `precise-${plan.op}`, boxes: boxes.length };
 }
