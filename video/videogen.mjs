@@ -129,7 +129,9 @@ async function storyVideo() {
     const [img, voice] = [images[i], await voiceJobs[i]];
     const imgFile = `${DIR}/s${i}.png`;
     fs.writeFileSync(`${DIR}/s${i}.raw`, Buffer.from(img.split(",")[1], "base64"));
-    ff(["-i", `${DIR}/s${i}.raw`, "-vf", `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2}`, imgFile]);
+    // المشاهد المرسومة: نقص 5% من الأطراف (يشيل علامة المصدر الصغيرة بالزاوية). صورة المستخدم تبقى كاملة
+    const trim = i === 0 && userImage ? "" : "crop=iw*0.9:ih*0.9:iw*0.05:ih*0.05,";
+    ff(["-i", `${DIR}/s${i}.raw`, "-vf", `${trim}scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2}`, imgFile]);
     let voiceFile = null, d = 4;
     if (voice) { voiceFile = `${DIR}/v${i}.mp3`; fs.writeFileSync(voiceFile, voice); d = Math.max(4, dur(voiceFile) + 0.9); }
     captionPng(s.caption_ar || "", `${DIR}/c${i}.png`);
