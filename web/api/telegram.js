@@ -10,7 +10,7 @@ import { ImageError, generateImage } from "./_imagegen.js";
 import { AR_SITE, detectIntent, stripLovable } from "./_intent.js";
 import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
-import { editImage, planImageFollowup, preciseEdit, redrawPrompt, verifyEdit, visionMessages } from "./_imageedit.js";
+import { editImage, enhanceImage, planImageFollowup, preciseEdit, redrawPrompt, verifyEdit, visionMessages } from "./_imageedit.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
 import { ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
@@ -60,6 +60,16 @@ async function sendPhoto(chat_id, buffer, mime, caption, extra = {}) {
   const j = await r.json().catch(() => ({}));
   if (!j.ok) throw new Error(j.description || "sendPhoto failed");
   return j.result;
+}
+
+async function sendDocument(chat_id, buffer, mime, filename, caption) {
+  const fd = new FormData();
+  fd.append("chat_id", String(chat_id));
+  fd.append("document", new Blob([buffer], { type: mime }), filename);
+  if (caption) fd.append("caption", caption.slice(0, 1024));
+  const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendDocument`, { method: "POST", body: fd });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) throw new Error(j.description || "sendDocument failed");
 }
 
 async function sendVoice(chat_id, buffer, caption) {
@@ -228,6 +238,27 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
   await remember(chat_id, state, [{ role: "user", content: `[عن الصورة] ${text || "شنو بهاي الصورة؟"}` }, { role: "assistant", content: answer }], { kind: "image" });
 }
 
+// تحسين الصورة مثل Remini: نرجعها أوضح وبدقة أعلى (صورة للعرض + ملف بالدقة الكاملة)
+async function doEnhance(chat_id, user, state, img, request = "") {
+  const usage = await usageToday(user.id);
+  if (user.role !== "admin" && usage.images >= user.daily_images) return send(chat_id, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا 🌙`);
+  const status = await send(chat_id, "✨ دا أوضّح الصورة وأرفع دقتها…");
+  const tick = setInterval(() => action(chat_id, "upload_photo").catch(() => {}), 4500); action(chat_id, "upload_photo");
+  try {
+    const out = await enhanceImage({ bytes: img.bytes, mime: img.mime });
+    const id = await storeImage(user, out.bytes, out.mime, `[تحسين] ${request}`, out.provider, out.w, out.h);
+    await logUsage(user.id, "image", 0, out.provider, "enhance");
+    await sendPhoto(chat_id, out.bytes, out.mime, `✨ وضّحتها ورفعت دقتها (${out.w}×${out.h})\nإذا تريد تعديل عليها گلي.`);
+    await sendDocument(chat_id, out.bytes, out.mime, `enhanced-${out.w}x${out.h}.png`, "📎 النسخة الكاملة بدون ضغط").catch((e) => console.error("doc", e.message));
+    if (status) await tg("deleteMessage", { chat_id, message_id: status.message_id });
+    await remember(chat_id, state, [{ role: "user", content: `[طلب تعديل على الصورة] ${request || "وضّح الصورة وارفع دقتها"}` },
+      { role: "assistant", content: `[عدّلت الصورة ودزيتها: وضّحتها ورفعت دقتها إلى ${out.w}×${out.h}]` }], { image: id, kind: "image" });
+  } catch (e) {
+    console.error("enhance", e.message);
+    if (status) await edit(chat_id, status.message_id, "خدمة توضيح الصور مشغولة هسه 🙏 جرّب بعد دقيقة.");
+  } finally { clearInterval(tick); }
+}
+
 async function doImageEdit(chat_id, user, state, img, request, plan = {}) {
   const usage = await usageToday(user.id);
   if (user.role !== "admin" && usage.images >= user.daily_images) return send(chat_id, `وصلت حدك اليومي (${user.daily_images} صورة). يتجدد غدًا 🌙`);
@@ -335,6 +366,7 @@ const WELCOME = `أهلًا وسهلًا بيك بـ «المبرمج المجه
 🎨 تريد صورة؟ اكتب: صمملي صورة …
 🌐 تريد موقع؟ اكتب: ابنيلي موقع … وأدزلك رابطه جاهز
 🎙 دز بصمة وأرد عليك بصوت وبنفس لهجتك
+📷 دز صورة وأوضّحها وأرفع دقتها، أو اطلب أي تعديل عليها
 🎬 دز مقطع فيديو وأرفع دقته وأرجعه إلك
 💬 أو اسألني أي سؤال`;
 
@@ -358,6 +390,7 @@ async function imageFollowup(chat_id, user, state, img, text, { voice, fromPhoto
   try { plan = await planImageFollowup({ bytes: img.bytes, mime: img.mime, history: recent(state), text }); }
   catch (e) { console.error("image plan", e.message); plan = { action: fromPhoto ? "ask" : "other" }; }
   if (plan.action === "edit") { await doImageEdit(chat_id, user, state, img, text, plan); return true; }
+  if (plan.action === "enhance") { await doEnhance(chat_id, user, state, img, text); return true; }
   if (plan.action === "ask" || (fromPhoto && plan.action === "other")) { await doVision(chat_id, user, state, img, text, { voice }); return true; }
   if (plan.action === "new") { await doImage(chat_id, user, text, state); return true; }
   return false;
@@ -407,10 +440,9 @@ async function handleMessage(update) {
     const bytes = Buffer.from(await r.arrayBuffer());
     const mime = msg.photo ? "image/jpeg" : (photo.mime_type || "image/jpeg");
     const id = await storeImage(user, bytes, mime, "[صورة من المستخدم]", "upload", photo.width || null, photo.height || null);
-    if (!text) {
-      const reply = "وصلتني الصورة 👌 شتريد أسوي بيها؟\nتگدر تگلي مثلًا: شيل شي منها، غيّر الخلفية، ضيف شي، خليها أوضح… أو اسألني عنها.";
-      await send(chat_id, reply);
-      return remember(chat_id, state, [{ role: "user", content: "[دزيت صورة]" }, { role: "assistant", content: reply }], { image: id, kind: "image" });
+    if (!text) { // صورة بدون كلام: نوضّحها ونرفع دقتها مباشرة (مثل Remini)، وبعدها يگدر يطلب أي تعديل
+      await remember(chat_id, state, [{ role: "user", content: "[دزيت صورة]" }], { image: id, kind: "image" });
+      return doEnhance(chat_id, user, state, { id, bytes, mime });
     }
     await remember(chat_id, state, [{ role: "user", content: "[دزيت صورة]" }], { image: id, kind: "image" });
     return imageFollowup(chat_id, user, state, { id, bytes, mime }, text, { voice: null, fromPhoto: true });

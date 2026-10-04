@@ -21,6 +21,7 @@ New user message: "${text || "(sent the image with no text)"}"
 
 Decide what the user wants, using the conversation and the image (they write in Iraqi Arabic; "هاي/هذا/الشغلة" refer to things in this image):
 - "edit": change this same image (remove/add/replace/recolor something, change background, write text on it, fix it, make it like X…)
+- "enhance": make this same image clearer / sharper / higher resolution / restore an old or blurry photo (وضحها، ارفع دقتها، حسّنها، صفيها، مثل ريميني…)
 - "ask": a question or request about the image's content (what is this, describe, read the text, is it real…)
 - "new": a completely new, unrelated image
 - "other": not about the image — including when the user refers to something said earlier in the chat rather than to the image (e.g. «تذكر شگتلك قبل شوية», «لا مو عالصورة»), small talk, or a new topic
@@ -30,12 +31,12 @@ For "edit", also classify the kind of edit:
 - "replace_text": change some written text in the image into other text
 - "add_text": write new text on the image
 - "other": anything else (recolor, change background, add an object, style…)
-Return ONLY JSON: {"action":"edit|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
+Return ONLY JSON: {"action":"edit|enhance|ask|new|other","op":"remove|replace_text|add_text|other","target":"<remove: exactly which thing(s) to erase, in English, quoting any text exactly as written in the image and saying if it appears more than once; replace_text: the exact old text as written in the image; add_text: where on the image to put the new text, in English (Iraqi «فوگ» = top of the image, «جوه» = bottom, «بالنص» = center, «يمين/يسار» = right/left side)>","new_text":"<replace_text/add_text: the exact new text, in the language the user wants>","instruction":"<for edit: one precise English edit instruction that names exactly what to change and where in THIS image, and says to keep everything else identical>"}`;
   const out = await directText([{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: toDataUrl(bytes, mime) } }] }],
     { provider: "gemini", prefer: LITE(), max_tokens: 400, timeout: 25_000 });
   let j = {};
   try { j = JSON.parse((String(out).match(/\{[\s\S]*\}/) || ["{}"])[0]); } catch { /* نرجع other */ }
-  const action = ["edit", "ask", "new", "other"].includes(j.action) ? j.action : "other";
+  const action = ["edit", "enhance", "ask", "new", "other"].includes(j.action) ? j.action : "other";
   const op = ["remove", "replace_text", "add_text"].includes(j.op) ? j.op : "other";
   return { action, op, target: String(j.target || "").slice(0, 400), newText: String(j.new_text || "").slice(0, 200), instruction: String(j.instruction || "").slice(0, 800) };
 }
@@ -340,4 +341,21 @@ export async function preciseEdit({ bytes, mime, plan }) {
   } else if (!eraseRegions(ctx, w, h, boxes)) return null;
   if (plan.op !== "remove") for (const b of boxes) drawText(ctx, plan.newText, b, b.color);
   return { bytes: canvas.toBuffer("image/png"), mime: "image/png", provider: `precise-${plan.op}`, boxes: boxes.length };
+}
+
+// ───────── تحسين الصور مثل Remini: توضيح الوجوه + رفع الدقة (CodeFormer مجاني) ─────────
+const ENHANCERS = ["sczhou/CodeFormer"];
+/** يرجع { bytes, mime, provider, w, h } أكبر وأوضح من الأصل، أو يرمي خطأ */
+export async function enhanceImage({ bytes, mime }) {
+  const src = await loadImage(bytes);
+  const errors = [];
+  for (const sp of ENHANCERS) {
+    try {
+      const r = await gradioEdit(sp, bytes, mime, "");
+      const im = await loadImage(r.bytes);
+      if (im.width <= src.width && im.height <= src.height) throw new Error("result is not bigger");
+      return { ...r, w: im.width, h: im.height };
+    } catch (e) { errors.push(`${sp}: ${String(e.message).slice(0, 160)}`); }
+  }
+  throw new Error(errors.join(" | "));
 }
