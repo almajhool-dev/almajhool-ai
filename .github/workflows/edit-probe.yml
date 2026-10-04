@@ -1,0 +1,17 @@
+name: Image edit probe (temporary)
+on:
+  push:
+    branches-ignore: [main]
+    paths: [".github/probe/**", ".github/workflows/edit-probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip -q install gradio_client
+      - run: python .github/probe/edit_probe.py
+      - uses: actions/upload-artifact@v4
+        with: { name: probe, path: probe_out, retention-days: 2 }
