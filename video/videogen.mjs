@@ -58,7 +58,20 @@ ${job.prompt ? `(وصف إنكليزي مساعد: ${job.prompt})` : ""}
   return { style: j.style_en || "cinematic, highly detailed", character: j.character_en || "", scenes };
 }
 
+// المشاهد تترسم وحدة ورا وحدة (الطلبات المجانية بنفس اللحظة تنرفض)، وبنفس الـ seed حتى يبقى الستايل واحد
+const SEED = Math.floor(Math.random() * 1e9);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function pollinations(prompt) {
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 1500))}?width=1024&height=1024&seed=${SEED}&nologo=true&model=flux&referrer=almajhool-ai.vercel.app`;
+  const res = await fetch(url, { headers: process.env.POLLINATIONS_API_KEY ? { Authorization: `Bearer ${process.env.POLLINATIONS_API_KEY}` } : {}, signal: AbortSignal.timeout(120_000) });
+  const ct = (res.headers.get("content-type") || "").split(";")[0];
+  if (!res.ok || !ct.startsWith("image/")) throw new Error(`pollinations ${res.status}`);
+  return `data:${ct};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
+}
 async function sceneImage(prompt) {
+  for (let a = 0; a < 3; a++) {
+    try { return await pollinations(prompt); } catch (e) { console.log("pollinations", a, e.message); await sleep(4000 * (a + 1)); }
+  }
   try { const r = await bestImage(prompt, request, null); if (r?.image) return r.image; } catch (e) { console.log("bestImage", String(e.message).slice(0, 160)); }
   return (await fallbackImage(prompt)).image;
 }
@@ -83,14 +96,15 @@ function captionPng(text, file) {
 async function storyVideo() {
   const sb = await storyboard();
   console.log("STORY", JSON.stringify(sb).slice(0, 600));
-  await say(`🎨 دا أرسم ${sb.scenes.length} مشاهد للمقطع…`);
-  // الصور والأصوات بنفس الوقت
+  // الأصوات كلها بنفس الوقت، والصور وحدة ورا وحدة
+  const voiceJobs = sb.scenes.map((s) => s.narration_ar ? speak(s.narration_ar, "iraqi").then((v) => v.audio).catch((e) => (console.log("tts", e.message), null)) : null);
+  const images = [];
+  for (const [i, s] of sb.scenes.entries()) {
+    await say(`🎨 دا أرسم المشهد ${i + 1} من ${sb.scenes.length}…`);
+    images.push(await sceneImage(`${s.visual_en}. ${sb.character}. Style: ${sb.style}. No text, no letters, no watermark.`));
+  }
   const parts = await Promise.all(sb.scenes.map(async (s, i) => {
-    const prompt = `${s.visual_en}. ${sb.character}. Style: ${sb.style}. No text, no letters, no watermark.`;
-    const [img, voice] = await Promise.all([
-      sceneImage(prompt),
-      s.narration_ar ? speak(s.narration_ar, "iraqi").then((v) => v.audio).catch((e) => (console.log("tts", e.message), null)) : null,
-    ]);
+    const [img, voice] = [images[i], await voiceJobs[i]];
     const imgFile = `${DIR}/s${i}.png`;
     fs.writeFileSync(`${DIR}/s${i}.raw`, Buffer.from(img.split(",")[1], "base64"));
     ff(["-i", `${DIR}/s${i}.raw`, "-vf", `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2}`, imgFile]);
