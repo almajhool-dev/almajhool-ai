@@ -17,7 +17,7 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --no-audit --no-fund
         working-directory: web
-      - run: cd web && node ../.github/probe/edit_spaces.mjs
+      - run: cp .github/probe/edit_spaces.mjs web/ && cd web && node edit_spaces.mjs
       - name: Publish results for a look
         run: |
           mkdir -p /tmp/pv && cp probe_out/* /tmp/pv/ && cd /tmp/pv && git init -q && git checkout -qb ci-image-preview

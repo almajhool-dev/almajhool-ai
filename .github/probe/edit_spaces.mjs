@@ -1,7 +1,7 @@
 // تجربة: أي مساحة تعديل صور تشتغل مجانًا وأيها يشيل اسم من صورة محادثة بدقة
 import fs from "fs";
 import { GlobalFonts, createCanvas } from "@napi-rs/canvas";
-import { gradioEdit } from "../../web/api/_imageedit.js";
+import { gradioEdit } from "./api/_imageedit.js";
 GlobalFonts.registerFromPath("fonts/maj-arabic.ttf", "A");
 const c = createCanvas(720, 540), g = c.getContext("2d");
 g.fillStyle = "#f2f3f5"; g.fillRect(0, 0, 720, 540);
