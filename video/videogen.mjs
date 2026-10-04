@@ -59,19 +59,22 @@ async function loadUserImage() {
   console.log("USER_IMAGE", imageDesc.slice(0, 300));
 }
 
-async function storyboard() {
+async function storyboard(retry = false) {
   const out = await directText([{ role: "user", content: `اكتب قصة مقطع فيديو قصير (4 مشاهد ورا بعض) لهذا الطلب: «${request}»
 ${userImage ? `المقطع يبدي من صورة المستخدم (المشهد الأول هو الصورة نفسها، وصفها: ${imageDesc}). المشاهد الثانية تكمل القصة بنفس الشخصيات ونفس الستايل بالضبط.` : ""}
 ${job.prompt ? `(وصف إنكليزي مساعد: ${job.prompt})` : ""}
-رجّع JSON فقط:
+رجّع JSON فقط (مختصر، بدون أي شرح):
 {"style_en":"<one visual style for all scenes: e.g. cinematic photorealistic, golden hour, 35mm>",
  "character_en":"<exact look of the main subject(s), repeated in every scene so they look the same>",
  "scenes":[{"visual_en":"<English image prompt for this scene: subject + action + setting + camera framing>","caption_ar":"<نص قصير على الشاشة، 2-5 كلمات>","narration_ar":"<جملة تعليق صوتي باللهجة العراقية، 6-14 كلمة>"}]}
 المشاهد لازم تكمل بعضها كقصة (بداية، تطور، ذروة، نهاية)، وكلها عن الطلب نفسه بالضبط.` }],
-  { provider: "gemini", max_tokens: 1200, timeout: 60_000 });
+  { provider: "gemini", max_tokens: 4000, timeout: 60_000 });
   const j = parseJson(out);
   const scenes = (j.scenes || []).filter((s) => s?.visual_en).slice(0, 5);
-  if (scenes.length < 2) throw new Error("storyboard failed: " + String(out).slice(0, 200));
+  if (scenes.length < 2) {
+    if (!retry) return storyboard(true); // أحيانًا الجواب ينقطع: نعيد مرة
+    throw new Error("storyboard failed: " + String(out).slice(0, 200));
+  }
   return { style: j.style_en || "cinematic, highly detailed", character: j.character_en || "", scenes };
 }
 
