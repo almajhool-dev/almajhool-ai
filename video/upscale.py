@@ -25,7 +25,7 @@ WORKER_BUDGET = 4.5 * 3600   # وقت المعالجة لكل جهاز (حد Git
 TARGET_PER_WORKER = 180      # نحاول كل جهاز يخلص جزئه بحدود 3 دقايق
 BOTAPI_IN, BOTAPI_OUT = 20 * 1024 * 1024, 49 * 1024 * 1024
 # ترميز يشتغل سلس على الموبايل: High profile، حد أعلى للبت ريت (بدون قفزات تخلي التشغيل يتقطع)
-PLAYABLE = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p"]
+PLAYABLE = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-maxrate", "8M", "-bufsize", "8M", "-pix_fmt", "yuv420p"]
 
 
 def log(*a):
