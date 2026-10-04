@@ -186,6 +186,11 @@ function pcmToMp3(pcm, rate = 24000) {
   return Buffer.concat(out);
 }
 const ttsGone = new Set();
+// أي حد خلص بالضبط (باليوم لو بالدقيقة) — حتى نعرف السبب من السجل
+function quotaInfo(j) {
+  const v = (j?.error?.details || []).flatMap((d) => d.violations || []).map((x) => `${x.quotaId || ""}=${x.quotaValue ?? "?"}`).filter((x) => x !== "=?");
+  return v.length ? `quota ${v.join(",")}` : "";
+}
 export async function geminiTTS(text, dialect = "iraqi", { voiceName = "Charon", timeout = 60_000 } = {}) {
   const errors = [];
   for (const model of TTS_MODELS()) {
@@ -202,7 +207,7 @@ export async function geminiTTS(text, dialect = "iraqi", { voiceName = "Charon",
           signal: AbortSignal.timeout(timeout),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) { errors.push(`${model}: ${r.status} ${String(j?.error?.message || "").slice(0, 100)}`); if (r.status === 404) ttsGone.add(model); continue; }
+        if (!r.ok) { errors.push(`${model}: ${r.status} ${quotaInfo(j) || String(j?.error?.message || "").slice(0, 100)}`); if (r.status === 404) ttsGone.add(model); continue; }
         const part = (j?.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);
         if (!part) { errors.push(`${model}: no audio`); continue; }
         const rate = Number(String(part.inlineData.mimeType || "").match(/rate=(\d+)/)?.[1] || 24000);
