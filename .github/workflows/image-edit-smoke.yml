@@ -9,6 +9,8 @@ on:
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       DATABASE_URL: postgres://unused:unused@localhost/unused
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -46,3 +48,11 @@ jobs:
             catch (e) { console.log('EDIT_UNAVAILABLE (falls back to redraw)', e.message.slice(0, 600));
               const p = await redrawPrompt({ bytes, mime, instruction: 'remove the red cable' }); console.log('REDRAW_PROMPT |', p.replace(/\s+/g, ' ').slice(0, 300)); }
             if (bad > 1) process.exitCode = 1;"
+      - name: Show the edited image (branches other than main)
+        if: github.ref != 'refs/heads/main'
+        working-directory: web
+        run: |
+          [ -f edited.png ] || exit 0
+          mkdir -p /tmp/pv && cp cat.jpg edited.png /tmp/pv/ && cd /tmp/pv && git init -q && git checkout -qb ci-image-preview
+          git config user.name preview && git config user.email preview@users.noreply.github.com && git add . && git commit -qm preview
+          git push -fq "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-image-preview
