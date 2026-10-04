@@ -12,7 +12,7 @@ import { applyOverlaysServer } from "./_overlay.js";
 import { generateSiteHtml } from "./_sitegen.js";
 import { editImage, enhanceImage, planImageFollowup, preciseEdit, redrawPrompt, verifyEdit, visionMessages } from "./_imageedit.js";
 import { DIALECT_NAMES, speak, transcribe } from "./_voice.js";
-import { ensureVideoTable, wakeWorker } from "./video-jobs.js";
+import { dispatch, ensureVideoTable, wakeWorker } from "./video-jobs.js";
 import { SITES_ORIGIN, estTokens, gateway, json, logUsage, randomId, sql, usageToday } from "./_lib.js";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -48,6 +48,9 @@ const ASKS_ABOUT = new RegExp([
   "gemini|جيميني|جمناي|جيمناي|جمني|chat\\s*gpt|شات\\s*جي|openai|claude|كلود|llama|deepseek|ديب\\s*سيك|grok|mistral",
   "who\\s+(made|built|created|developed|trained)\\s+you|what\\s+(ai|model|llm)\\s+(are|is)",
 ].join("|"), "i");
+// «سويلي فيديو/مقطع…»: إنشاء مقطع بالذكاء الاصطناعي من الوصف (مو رفع دقة مقطع)
+const VIDEO_GEN = /(سوي|سوّي|سويلي|سوّيلي|اسوي|اعمل|اعملي|اعملّي|انشئ|أنشئ|انشأ|صمم|صمّم|صمملي|ولد|ولّد|ولدلي|اصنع|ابي|أبي|اريد|أريد|بدي|عايز|make|create|generate)[^\n]{0,40}(فيديو|فديو|ڤيديو|مقطع|كليب|انيميشن|أنيميشن|video|clip|animation)/i;
+const isVideoGen = (t) => VIDEO_GEN.test(t) && !/(دق[ةه]|ارفع|إرفع|وضح|وضّح|حسن|حسّن|upscale|enhance|موقع|متجر|تطبيق|لعب[ةه]|صفح[ةه]|website|site|app)/i.test(t);
 const linkButtons = (rows) => ({ reply_markup: { inline_keyboard: rows.map((r) => r.map(([text, url]) => ({ text, url }))) } });
 
 async function sendPhoto(chat_id, buffer, mime, caption, extra = {}) {
@@ -238,6 +241,22 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
   await remember(chat_id, state, [{ role: "user", content: `[عن الصورة] ${text || "شنو بهاي الصورة؟"}` }, { role: "assistant", content: answer }], { kind: "image" });
 }
 
+// إنشاء مقطع بالذكاء الاصطناعي: نكتب وصف إنكليزي ممتاز ونبعثه لأجهزة GitHub، وهي تسويه وتدزه للمستخدم
+async function doVideoGen(chat_id, user, state, text, reply_to) {
+  const status = await send(chat_id, "🎬 دا أجهز المقطع… ياخذ تقريبًا 1–3 دقايق، وراح يوصلك هنا.");
+  let prompt = text;
+  try {
+    prompt = String(await directText([
+      { role: "system", content: "Turn the user's request (any language or dialect) into ONE vivid English text-to-video prompt, max 70 words: main subject and its look, the action/motion, setting, camera movement, lighting and style. Keep every detail the user asked for. Output only the prompt." },
+      ...recent(state).slice(-4), { role: "user", content: text },
+    ], { provider: "gemini", max_tokens: 300, timeout: 25_000 })).trim().replace(/^["']|["']$/g, "") || text;
+  } catch (e) { console.error("video prompt", e.message); }
+  const ok = await dispatch("videogen", { chat_id, reply_to, status_message_id: status?.message_id, prompt: prompt.slice(0, 900), request: text.slice(0, 300) });
+  if (!ok && status) await edit(chat_id, status.message_id, "خدمة إنشاء المقاطع ما تشتغل هسه 🙏 جرّب بعد شوية.");
+  await logUsage(user.id, "videogen", 0, "github", "videogen").catch(() => {});
+  await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: `[دا أسوي مقطع فيديو بالذكاء الاصطناعي: ${prompt.slice(0, 200)}]` }]);
+}
+
 // تحسين الصورة مثل Remini: نرجعها أوضح وبدقة أعلى (صورة للعرض + ملف بالدقة الكاملة)
 async function doEnhance(chat_id, user, state, img, request = "") {
   const usage = await usageToday(user.id);
@@ -367,6 +386,7 @@ const WELCOME = `أهلًا وسهلًا بيك بـ «المبرمج المجه
 🌐 تريد موقع؟ اكتب: ابنيلي موقع … وأدزلك رابطه جاهز
 🎙 دز بصمة وأرد عليك بصوت وبنفس لهجتك
 📷 دز صورة وأوضّحها وأرفع دقتها، أو اطلب أي تعديل عليها
+🎥 اكتب: سويلي فيديو … وأسويلك مقطع بالذكاء الاصطناعي
 🎬 دز مقطع فيديو وأرفع دقته وأرجعه إلك
 💬 أو اسألني أي سؤال`;
 
@@ -466,6 +486,7 @@ async function handleMessage(update) {
       if (handled) return;
     }
   }
+  if (provider === "auto" && isVideoGen(text)) return doVideoGen(chat_id, user, state, text, msg.message_id);
   const intent = detectIntent(text, !!state.site_slug);
   if (intent.type === "lovable") { // بالبوت نبنيه وننشره مباشرة بدل ما نحوله لمنصة ثانية
     const req = stripLovable(text);
