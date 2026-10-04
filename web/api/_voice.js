@@ -210,24 +210,6 @@ export async function geminiTTS(text, dialect = "iraqi", { voiceName = "Charon",
 export const normalizeForTTS = (t) => String(t).replace(/گ/g, "ك").replace(/چ/g, "تش").replace(/ڤ/g, "ف").replace(/پ/g, "ب");
 
 /** يرجع MP3 (Buffer) للنص بصوت مناسب للهجة */
-/**
- * الصوت الاحتياطي (Microsoft) يقرا الكلام مثل ما مكتوب، فالكلمات العراقية تطلع مكسرة.
- * الحل: نشكّل النص بالحركات حسب النطق العراقي (Gemini)، ونبطئ شوية — فيقراها صح وواضح.
- */
-export async function diacritizeIraqi(text) {
-  const { directText } = await import("./_direct.js");
-  const out = await directText([{ role: "user", content: `شكّل هذا الكلام العراقي بالحركات الكاملة (فتحة، ضمة، كسرة، سكون، شدة) حسب نطقه باللهجة العراقية البغدادية بالضبط، حتى يقراه قارئ آلي صح (مثلًا: شْلُونَكْ، هَسَّه، شْكُو مَاكُو، گُلِّي). لا تغيّر ولا تضيف ولا تحذف أي كلمة. رجّع الكلام المشكّل بس:\n${text}` }],
-    { provider: "gemini", max_tokens: 1500, timeout: 20_000 });
-  const t = String(out || "").trim();
-  // نتأكد ما تغيّر الكلام: نفس الحروف بعد شيل الحركات
-  const bare = (x) => x.replace(/[\u064B-\u0652\u0670\s.,،؟?!]/g, "");
-  return t && Math.abs(bare(t).length - bare(text).length) <= Math.max(3, bare(text).length * 0.08) ? t : text;
-}
-export async function edgeIraqi(text, voice = VOICES.iraqi) {
-  const marked = await diacritizeIraqi(text).catch(() => text);
-  return edgeTTS(normalizeForTTS(marked), voice, { rate: "-8%" });
-}
-
 export async function speak(text, dialect = "iraqi") {
   const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
   if (!clean) throw new Error("نص فارغ");
@@ -236,7 +218,6 @@ export async function speak(text, dialect = "iraqi") {
   catch (e) { console.error("gemini tts", e.message); }
   const voice = VOICES[dialect] || VOICES.other;
   const edgeText = normalizeForTTS(clean);
-  if (dialect === "iraqi") { try { return { audio: await edgeIraqi(clean, voice), voice: `${voice}+tashkeel` }; } catch (e) { console.error("edge iraqi", e.message); } }
   try { return { audio: await edgeTTS(edgeText, voice), voice }; }
   catch (e) {
     console.error("edge tts", e.message);

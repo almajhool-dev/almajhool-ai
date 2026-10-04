@@ -127,9 +127,11 @@ ${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}
 // تسجيل واحد لكل التعليق بالصوت العراقي الواضح (Gemini). إذا الحصة مشغولة ننتظر ونعيد بدل الصوت الاحتياطي
 async function narrateAll(lines) {
   const text = lines.filter(Boolean).join("\n\n");
-  for (let a = 0; a < 3; a++) {
-    try { return await geminiTTS(text, "iraqi", { timeout: 150_000 }); }
-    catch (e) { console.log("narration tts", a, String(e.message).slice(0, 160)); if (a < 2) await sleep(a ? 60_000 : 25_000); }
+  // حد الصوت الواضح بالدقيقة (مو باليوم): نعيد لحد ~4 دقايق — المقطع مو مستعجل، والصوت الواضح يستاهل
+  const waits = [15, 25, 35, 45, 60, 60];
+  for (let a = 0; a <= waits.length; a++) {
+    try { const audio = await geminiTTS(text, "iraqi", { timeout: 150_000 }); console.log("NARRATION_VOICE gemini, attempt", a + 1); return audio; }
+    catch (e) { console.log("narration tts", a, String(e.message).slice(0, 120)); if (a < waits.length) await sleep(waits[a] * 1000); }
   }
   return null;
 }
