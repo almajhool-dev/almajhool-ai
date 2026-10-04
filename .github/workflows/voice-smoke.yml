@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+      GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+      GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +25,17 @@ jobs:
         run: |
           curl -fsS -H "x-goog-api-key: $GEMINI_API_KEY" "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" \
             | jq -r '.models[] | select(.supportedGenerationMethods | index("generateContent")) | .name' | sed 's#models/##' | grep -Ei 'tts|audio|flash|pro' | tr '\n' ' '
+      - name: Clear Iraqi voice — each key separately (project + quota left)
+        continue-on-error: true
+        run: |
+          i=0
+          for K in "$GEMINI_API_KEY" "$GEMINI_API_KEY_2" "$GEMINI_API_KEY_3" "$GEMINI_API_KEY_4"; do
+            i=$((i+1)); [ -n "$K" ] || { echo "KEY$i missing"; continue; }
+            r=$(curl -sS -H "x-goog-api-key: $K" -H "Content-Type: application/json" \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent" \
+              -d '{"contents":[{"parts":[{"text":"Say in Iraqi Arabic: هلو شلونك"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Charon"}}}}}')
+            echo "KEY$i: $(echo "$r" | jq -c 'if .error then {code:.error.code, quota:[.error.details[]?.violations[]? | {quotaId, quotaValue}], project:([.error.details[]?.metadata?.consumer?]|first), msg:.error.message[0:90]} else "OK audio" end')"
+          done
       - name: Speak in several dialects (Edge voices)
         working-directory: web
         run: |
