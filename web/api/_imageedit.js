@@ -88,7 +88,7 @@ async function pollinationsEdit(publicUrl, instruction) {
 const SPACES = ["multimodalart/Qwen-Image-Edit-Fast", "black-forest-labs/FLUX.1-Kontext-Dev", "Qwen/Qwen-Image-Edit"];
 const spaceHost = (id) => `https://${id.toLowerCase().replace(/[/._]/g, "-")}.hf.space`;
 
-async function gradioEdit(space, bytes, mime, instruction) {
+export async function gradioEdit(space, bytes, mime, instruction) {
   const base = spaceHost(space);
   const auth = process.env.HF_TOKEN ? { Authorization: `Bearer ${process.env.HF_TOKEN}` } : {};
   const info = await (await fetch(`${base}/gradio_api/info`, { headers: auth, signal: AbortSignal.timeout(20_000) })).json();
