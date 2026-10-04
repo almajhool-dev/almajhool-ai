@@ -1,0 +1,23 @@
+name: Bot diagnosis (temporary)
+on:
+  push:
+    branches-ignore: [main]
+    paths: [".github/workflows/bot-diag.yml"]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    steps:
+      - run: |
+          echo "== webhook info"; curl -sS "https://api.telegram.org/bot$T/getWebhookInfo" | jq -c '.result | {url, pending_update_count, last_error_message, last_error_date: (.last_error_date|todate?), max_connections}'
+          date -u
+          echo "== GET"; curl -sS -m 30 -w "  HTTP %{http_code} %{time_total}s\n" https://almajhool-ai.vercel.app/api/telegram
+          echo "== GET video-jobs"; curl -sS -m 30 -w "  HTTP %{http_code} %{time_total}s\n" https://almajhool-ai.vercel.app/api/video-jobs
+          SECRET=$(printf '%s' "$T" | sha256sum | cut -c1-48)
+          echo "== POST fake update (chat 1, not a real user)"
+          curl -sS -m 60 -w "  HTTP %{http_code} %{time_total}s\n" -X POST https://almajhool-ai.vercel.app/api/telegram \
+            -H "Content-Type: application/json" -H "X-Telegram-Bot-Api-Secret-Token: $SECRET" \
+            -d "{\"update_id\": $((RANDOM*100000+RANDOM)), \"message\": {\"message_id\": 1, \"date\": 0, \"from\": {\"id\": 1, \"is_bot\": false, \"first_name\": \"diag\"}, \"chat\": {\"id\": 1, \"type\": \"private\"}, \"text\": \"هلو\"}}"
+          sleep 20
+          echo "== webhook info again"; curl -sS "https://api.telegram.org/bot$T/getWebhookInfo" | jq -c '.result | {pending_update_count, last_error_message, last_error_date: (.last_error_date|todate?)}'
