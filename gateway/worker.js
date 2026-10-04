@@ -22,7 +22,7 @@ const PROVIDERS = [
   { id: "nvidia", tier: 1, url: "https://integrate.api.nvidia.com/v1", key: "NVIDIA_API_KEY", maxOut: 16000,
     models: ["meta/llama-3.3-70b-instruct", "qwen/qwen3-235b-a22b", "nvidia/llama-3.3-nemotron-super-49b-v1"], cap: "≈10,000 طلب/يوم لكل نموذج", signup: "https://build.nvidia.com" },
   { id: "mistral", tier: 1, url: "https://api.mistral.ai/v1", key: "MISTRAL_API_KEY", maxOut: 32000,
-    models: ["mistral-medium-latest", "mistral-small-latest"], cap: "رصيد مجاني شهري", signup: "https://console.mistral.ai/api-keys" },
+    models: ["open-mistral-nemo", "ministral-8b-latest", "mistral-small-latest"], cap: "رصيد مجاني شهري", signup: "https://console.mistral.ai/api-keys" },
   { id: "zai", tier: 1, url: "https://api.z.ai/api/paas/v4", key: "ZAI_API_KEY", maxOut: 16000,
     models: ["glm-4.7-flash", "glm-4.5-flash"], cap: "مجاني دائم (طلب واحد بنفس اللحظة)", signup: "https://z.ai/manage-apikey/apikey-list" },
   { id: "openrouter", tier: 1, url: "https://openrouter.ai/api/v1", key: "OPENROUTER_API_KEY", usage: true, maxOut: 32000, routerList: true,
