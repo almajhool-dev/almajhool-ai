@@ -1,0 +1,28 @@
+name: Video generation probe (temporary)
+on:
+  push:
+    branches-ignore: [main]
+    paths: [".github/probe/**", ".github/workflows/edit-probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DATABASE_URL: postgres://unused:unused@localhost/unused
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: cp .github/probe/t2v.mjs web/ && cd web && node t2v.mjs
+      - name: Frames for a look
+        if: always()
+        run: |
+          [ -d probe_out ] || exit 0
+          sudo apt-get -qq install -y ffmpeg >/dev/null 2>&1 || true
+          cd probe_out && for f in *.mp4; do ffprobe -v error -show_entries stream=width,height:format=duration -of compact "$f"; ffmpeg -v error -y -i "$f" -vf "fps=1,scale=320:-1,tile=4x1" -frames:v 1 "${f%.mp4}.jpg" || true; done
+          rm -f *.mp4; git init -q && git checkout -qb ci-probe-edit
+          git config user.name preview && git config user.email preview@users.noreply.github.com && git add . && git commit -qm t2v
+          git push -fq "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-probe-edit
