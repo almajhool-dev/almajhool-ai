@@ -24,6 +24,8 @@ MAX_WORKERS = 20             # أقصى عدد أجهزة GitHub بنفس الو
 WORKER_BUDGET = 4.5 * 3600   # وقت المعالجة لكل جهاز (حد GitHub 6 ساعات)
 TARGET_PER_WORKER = 180      # نحاول كل جهاز يخلص جزئه بحدود 3 دقايق
 BOTAPI_IN, BOTAPI_OUT = 20 * 1024 * 1024, 49 * 1024 * 1024
+# ترميز يشتغل سلس على الموبايل: High profile، حد أعلى للبت ريت (بدون قفزات تخلي التشغيل يتقطع)
+PLAYABLE = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p"]
 
 
 def log(*a):
@@ -157,12 +159,14 @@ def plan_for(info):
         if max(mw, mh) < 320:
             mode = "ffmpeg"
     if mode == "ffmpeg":
-        cap = 3840 if long > 1920 else min(2 * long, 2560)
+        cap = 3840 if long > 1920 else min(2 * long, 1920)
         k = max(1.0, cap / long) if long <= 1920 else 1.0
         ow, oh = even(w * k), even(h * k)
         workers = max(1, min(MAX_WORKERS, math.ceil(n / 3000)))
     else:
-        cap = 3840 if long >= 1080 else 2560
+        # Full HD (1920 للضلع الطويل): أوضح بهواية من الأصل ويشتغل سلس بتلكرام على كل الموبايلات
+        # (1440×2560 و4K كانت تتقطع على بعض الأجهزة فتبين الصورة متأخرة عن الصوت)
+        cap = 1920
         k = min(4 * max(mw, mh), cap) / max(mw, mh)
         ow, oh = even(mw * k), even(mh * k)
     per = math.ceil(n / workers)
@@ -300,11 +304,11 @@ def stage_process(seg_index):
     # (وبعشرين جهاز يتجمع الفرق ويصير الصوت متقدم أو متأخر)
     start_t = max(0.0, (seg["start"] - 0.5) / fps)
     enc = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{ow}x{oh}", "-r", str(fps), "-i", "-",
-           "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", out]
+           *PLAYABLE, out]
     if plan["mode"] == "ffmpeg":
         sh(["ffmpeg", "-v", "error", "-y", "-ss", f"{start_t:.6f}", "-i", os.path.join(WORK, "src.mkv"), "-frames:v", str(seg["count"]), "-an",
             "-vf", f"hqdn3d=1.2:1.2:5:5,scale={ow}:{oh}:flags=lanczos,unsharp=5:5:0.7:3:3:0.3",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", out])
+            *PLAYABLE, out])
         return
     import numpy as np
     import torch
