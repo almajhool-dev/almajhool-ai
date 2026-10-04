@@ -38,7 +38,9 @@ const BASE = [
   { id: "nvidia", label: "NVIDIA", key: "NVIDIA_API_KEY",
     url: "https://integrate.api.nvidia.com/v1/chat/completions", models: ["meta/llama-3.3-70b-instruct", "qwen/qwen3-235b-a22b", "nvidia/llama-3.3-nemotron-super-49b-v1"] },
   { id: "mistral", label: "Mistral", key: "MISTRAL_API_KEY",
-    url: "https://api.mistral.ai/v1/chat/completions", models: ["mistral-medium-latest", "mistral-small-latest"] },
+    url: "https://api.mistral.ai/v1/chat/completions",
+    // الخطة المجانية: medium/small حدّها صفر — Nemo و Ministral 8B مسموحة (~188 طلب بالدقيقة)
+    models: ["open-mistral-nemo", "ministral-8b-latest", "mistral-small-latest"] },
   { id: "zai", label: "Z.ai GLM", key: "ZAI_API_KEY",
     url: "https://api.z.ai/api/paas/v4/chat/completions", models: ["glm-4.7-flash", "glm-4.5-flash"] },
   { id: "sambanova", label: "SambaNova", key: "SAMBANOVA_API_KEY",

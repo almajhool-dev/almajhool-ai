@@ -19,6 +19,7 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       EXTRA_PROVIDERS: ${{ secrets.EXTRA_PROVIDERS }}
     steps:
@@ -27,6 +28,35 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --no-audit --no-fund
         working-directory: web
+      - name: Each free provider answers an Iraqi question (its own key)
+        continue-on-error: true
+        working-directory: web
+        run: |
+          node --input-type=module -e "
+            import { DIRECT } from './api/_direct.js';
+            for (const p of DIRECT) {
+              const key = process.env[p.key];
+              if (!key && !p.keyless) { console.log('PROVIDER', p.id, 'no key'); continue; }
+              const s = Date.now();
+              try {
+                const r = await fetch(p.url, { method: 'POST', signal: AbortSignal.timeout(40000),
+                  headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: 'Bearer ' + String(key).split(/[\\s,]+/)[0] } : {}), ...(p.headers || {}) },
+                  body: JSON.stringify({ model: p.models[0], max_tokens: 200, messages: [{ role: 'user', content: 'جاوب بالعراقي بجملة وحدة: شنو أشهر أكلة ببغداد؟' }] }) });
+                const j = await r.json().catch(() => ({}));
+                console.log('PROVIDER', p.id, r.status, (Date.now() - s) + 'ms', r.ok ? (j.choices?.[0]?.message?.content || '').slice(0, 120).replace(/\\n/g, ' ') : JSON.stringify(j).slice(0, 160));
+              } catch (e) { console.log('PROVIDER', p.id, 'error', e.message); }
+            }"
+      - name: Mistral details (limits per model)
+        continue-on-error: true
+        run: |
+          [ -n "$MISTRAL_API_KEY" ] || exit 0
+          echo "models: $(curl -sS -H "Authorization: Bearer $MISTRAL_API_KEY" https://api.mistral.ai/v1/models | jq -r '[.data[]?.id] | length') available"
+          for M in mistral-large-latest magistral-medium-latest magistral-small-latest pixtral-large-latest mistral-saba-latest ministral-14b-latest ministral-3b-latest open-mistral-nemo devstral-medium-latest; do
+            curl -sS -D /tmp/h -o /tmp/b -H "Authorization: Bearer $MISTRAL_API_KEY" -H "Content-Type: application/json" \
+              https://api.mistral.ai/v1/chat/completions -d "{\"model\":\"$M\",\"max_tokens\":30,\"messages\":[{\"role\":\"user\",\"content\":\"جاوب باللهجة العراقية بجملة وحدة: شلونك؟\"}]}"
+            echo "MISTRAL $M $(head -1 /tmp/h | tr -d '\r') | $(grep -i ratelimit /tmp/h | tr -d '\r' | tr '\n' ' ') | $(jq -c '.choices[0].message.content // .message // .' /tmp/b | head -c 200)"
+            sleep 2
+          done
       - name: Quick reply speed (voice notes and small talk)
         continue-on-error: true
         working-directory: web
