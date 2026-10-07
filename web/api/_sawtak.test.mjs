@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 process.env.SAWTAK_API_KEY = "test-key";
 
 const sawtak = await import("./_sawtak.js");
-const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe } = sawtak;
+const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS } = sawtak;
 
 test("selects the ready Haider Iraqi voice", () => {
   const id = sawtakVoiceIdFromList({
@@ -33,7 +33,8 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
     assert.equal(body.sample_rate, 24000);
     assert.equal(body.normalize_text, true);
     assert.equal(body.enhance_pronunciation, true);
-    assert.equal(body.input, "هلو شلونك");
+    assert.equal(body.temperature, 0.35);
+    assert.equal(body.input, "هلو شلونك.");
 
     const pcm = new Uint8Array([0, 0, 1, 0, 2, 0, 3, 0]);
     return new Response(pcm, {
@@ -72,4 +73,14 @@ test("Sawtak STT sends Telegram voice audio and returns Iraqi transcript", async
 
   const heard = await sawtakTranscribe(new Uint8Array([1, 2, 3, 4]), "audio/ogg");
   assert.deepEqual(heard, { transcript: "هلو شلونك شخبارك", dialect: "iraqi" });
+});
+
+
+test("prepares Iraqi speech text for clear pacing", () => {
+  assert.equal(prepareIraqiTTS("هلووووو شلونك"), "هلوو شلونك.");
+  const long = "هلو عيني شلونك اليوم ان شاء الله كلشي تمام وياك وامورك زينة وماكو شي يضوجك";
+  const out = prepareIraqiTTS(long);
+  assert.ok(out.includes("، "));
+  assert.ok(out.endsWith("."));
+  assert.ok(!out.includes("وووو"));
 });

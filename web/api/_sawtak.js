@@ -5,6 +5,27 @@ let cachedHaiderId = "";
 
 const apiKey = () => String(process.env.SAWTAK_API_KEY || "").trim();
 
+export function prepareIraqiTTS(text) {
+  let s = String(text || "")
+    .replace(/\r?\n+/g, ". ")
+    .replace(/([؟!.,،])(?:\s*\1)+/g, "$1")
+    .replace(/([\u0621-\u064A\u066E-\u06D3])\1{2,}/gu, "$1$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!s) return "";
+
+  const words = s.split(/\s+/);
+  if (!/[.؟!،]/u.test(s) && words.length > 12) {
+    const chunks = [];
+    for (let i = 0; i < words.length; i += 12) chunks.push(words.slice(i, i + 12).join(" "));
+    s = chunks.join("، ");
+  }
+
+  if (!/[.!؟!]$/u.test(s)) s += ".";
+  return s;
+}
+
 function rowsOf(payload) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.data)) return payload.data;
@@ -58,7 +79,7 @@ export async function sawtakHaiderVoiceId({ timeout = 10_000 } = {}) {
 export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
   const key = apiKey();
   if (!key) throw new Error("SAWTAK_API_KEY not set");
-  const input = String(text || "").trim();
+  const input = prepareIraqiTTS(text);
   if (!input) throw new Error("Sawtak TTS text is empty");
 
   const voice = await sawtakHaiderVoiceId({ timeout: Math.min(timeout, 10_000) });
@@ -71,6 +92,9 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
       input,
       response_format: "pcm",
       sample_rate: 24000,
+      normalize_text: true,
+      enhance_pronunciation: true,
+      temperature: 0.35,
     }),
     signal: AbortSignal.timeout(timeout),
   });
