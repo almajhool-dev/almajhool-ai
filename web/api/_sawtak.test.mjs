@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 process.env.SAWTAK_API_KEY = "test-key";
 
 const sawtak = await import("./_sawtak.js");
-const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, splitIraqiTTS } = sawtak;
+const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, splitIraqiTTS, sawtakTTSJoined } = sawtak;
 
 test("selects the ready Haider Iraqi voice", () => {
   const id = sawtakVoiceIdFromList({
@@ -92,4 +92,23 @@ test("splits long Iraqi replies into short speech chunks", () => {
   assert.ok(chunks.length >= 2);
   assert.ok(chunks.every((part) => part.length <= 55));
   assert.equal(chunks.join(" ").replace(/\s+/g, " ").trim(), prepareIraqiTTS(text).replace(/\s+/g, " ").trim());
+});
+
+
+test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), body: init.body });
+    const pcm = new Uint8Array([0,0,1,0,2,0,3,0]);
+    return new Response(pcm, { status: 200, headers: { "X-Sample-Rate": "24000" } });
+  };
+  t.after(() => { globalThis.fetch = previousFetch; });
+
+  const phrase = "هلو عيني شلونك، آني حاضر وياك وكلشي تمام، وإذا تريد أي شي گلي وأنا أساعدك هسه. ";
+  const text = phrase.repeat(5).trim();
+  assert.ok(text.length > 260 && text.length < 900);
+  const out = await sawtakTTSJoined(text, { retries: 0 });
+  assert.equal(calls.length, 1);
+  assert.ok(out.pcm.byteLength > 0);
 });

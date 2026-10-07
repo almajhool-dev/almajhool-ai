@@ -172,7 +172,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     // رد سريع: البصمة (لازم تكون فورية) والسوالف القصيرة — نموذج سريع واحد بدل انتظار كل النماذج
     const quick = provider === "auto" && !factual && (voice || (text.length < 60 && !/\n/.test(text)));
     if (quick) {
-      try { answer = await directText(messages, { max_tokens: voice ? 600 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
+      try { answer = await directText(messages, { max_tokens: voice ? 220 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
       catch (e) { console.error("quick", e.message); }
     }
     // سؤال عن حقيقة بالبصمة: نجاوب من البحث مباشرة (أسرع من تجميع كل النماذج)
@@ -188,14 +188,19 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     if (!answer && provider === "auto" && needsSearch(text)) {
       try { answer = (await searchAnswer(text, { history })).text; } catch (e) { console.error("search", e.message); }
     }
-    if (!answer) answer = await directText(messages, { max_tokens: 4096, timeout: 60_000, provider });
+    if (!answer) answer = await directText(messages, { max_tokens: voice ? 240 : 4096, timeout: 60_000, provider });
   } catch {
-    const r = await gateway("/api/chat", { messages, max_tokens: 4096 });
+    const r = await gateway("/api/chat", { messages, max_tokens: voice ? 240 : 4096 });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return send(chat_id, "صار خلل بالنماذج، جرّب بعد شوية 🙏");
     answer = d.text || "";
   }
   answer = String(answer).replace(/^\s*\[[^\]\n]{3,300}\]\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim() || answer; // ما نخلي النموذج يدّعي إنه سوى شي
+  if (voice && answer.length > 700) {
+    const head = answer.slice(0, 700);
+    const cut = Math.max(head.lastIndexOf("."), head.lastIndexOf("؟"), head.lastIndexOf("!"), head.lastIndexOf("،"));
+    answer = (cut > 300 ? head.slice(0, cut + 1) : head).trim();
+  }
   let spoken = false;
   if (voice) {
     try {
