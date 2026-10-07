@@ -212,7 +212,13 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
     }),
     signal: AbortSignal.timeout(timeout),
   });
-  if (!r.ok) throw new Error(`sawtak tts HTTP ${r.status}: ${await errorText(r)}`);
+  if (!r.ok) {
+    const err = new Error(`sawtak tts HTTP ${r.status}: ${await errorText(r)}`);
+    err.status = r.status;
+    const retryAfter = Number(r.headers.get("retry-after") || 0);
+    err.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
+    throw err;
+  }
   const sampleRate = Number(r.headers.get("x-sample-rate") || 24000);
   const rawPcm = new Uint8Array(await r.arrayBuffer());
   if (!rawPcm.byteLength) throw new Error("sawtak tts: empty audio");
@@ -262,7 +268,7 @@ export async function sawtakTranscribe(audio, mime = "audio/ogg", { timeout = 45
 }
 
 
-export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, maxWords = 4 } = {}) {
+export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 3, maxWords = 4, concurrency = 2 } = {}) {
   const chunks = splitSawtakWords(text, maxWords);
   if (!chunks.length) throw new Error("Sawtak TTS text is empty");
 
@@ -279,16 +285,23 @@ export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, max
         return result;
       } catch (e) {
         lastError = e;
-        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 450 * (attempt + 1)));
+        if (attempt < retries) {
+          const waitMs = e?.status === 429
+            ? Math.max(e.retryAfterMs || 0, Math.min(20_000, 3000 * (2 ** attempt)))
+            : 650 * (attempt + 1);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
       }
     }
     throw lastError || new Error("Sawtak TTS failed");
   };
 
-  // Sawtak's documented account concurrency is 5. Keep at most 5 short chunks in flight.
+  // Keep the burst small even if the provider allows more concurrency:
+  // this avoids account-level 429s while still synthesizing a greeting quickly.
   const parts = [];
-  for (let i = 0; i < chunks.length; i += 5) {
-    const batch = await Promise.all(chunks.slice(i, i + 5).map(synthOne));
+  const batchSize = Math.max(1, Math.min(2, Number(concurrency) || 2));
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const batch = await Promise.all(chunks.slice(i, i + batchSize).map(synthOne));
     parts.push(...batch);
   }
 
