@@ -1,0 +1,45 @@
+name: Sawtak live smoke
+
+on:
+  push:
+    branches: ["fix/sawtak-haider-live"]
+    paths:
+      - ".github/workflows/sawtak-live.yml"
+      - "web/api/_sawtak.js"
+      - "web/api/_voice.js"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Sawtak Haider live API
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SAWTAK_API_KEY:-}" ]; then
+            echo "SAWTAK_KEY_MISSING"
+            exit 2
+          fi
+          VOICES=$(curl -fsS --get 'https://api.sawtakarabi.ai/v1/voices' \
+            -H "Authorization: Bearer $SAWTAK_API_KEY" \
+            --data-urlencode 'search=حيدر' \
+            --data-urlencode 'limit=10' \
+            --data-urlencode 'sharing_status=public')
+          echo "$VOICES" | jq -c '{matches:[.data[]? | {id,name,status,labels}]}'
+          VID=$(echo "$VOICES" | jq -r '.data[]? | select(.name=="حيدر" and .status=="ready") | .id' | head -1)
+          if [ -z "$VID" ]; then
+            echo "HAIDER_NOT_FOUND"
+            exit 3
+          fi
+          CODE=$(curl -sS -o /tmp/haider.wav -w '%{http_code}'             'https://api.sawtakarabi.ai/v1/audio/speech'             -H "Authorization: Bearer $SAWTAK_API_KEY"             -H 'Content-Type: application/json'             -d "$(jq -nc --arg voice "$VID" --arg input 'هلو شلونك شخبارك'               '{model:"arabic-tts-1",voice:$voice,input:$input,response_format:"wav",sample_rate:24000,normalize_text:true,enhance_pronunciation:true}')")
+          echo "TTS_HTTP=$CODE"
+          echo "TTS_BYTES=$(wc -c < /tmp/haider.wav)"
+          if [ "$CODE" != "200" ]; then
+            echo "TTS_ERROR=$(head -c 500 /tmp/haider.wav)"
+            exit 4
+          fi
+          file /tmp/haider.wav

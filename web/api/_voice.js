@@ -232,12 +232,10 @@ export async function speak(text, dialect = "iraqi") {
   const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
   if (!clean) throw new Error("نص فارغ");
   if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
-    try {
-      const { pcm, sampleRate } = await sawtakTTSRaw(clean, { timeout: 35_000 });
-      return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
-    } catch (e) { console.error("sawtak tts", e.message); }
+    const { pcm, sampleRate } = await sawtakTTSRaw(clean, { timeout: 35_000 });
+    return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
   }
-  // Sawtak/حيدر أولاً للعراقي، وبعده Gemini ثم Edge ثم Google كاحتياط.
+  // الأصوات القديمة تبقى احتياط فقط إذا Sawtak غير مفعّل أصلًا.
   try { return { audio: await geminiTTS(clean, dialect, { timeout: 12_000 }), voice: "gemini" }; }
   catch (e) { console.error("gemini tts", e.message); }
   const voice = VOICES[dialect] || VOICES.other;
