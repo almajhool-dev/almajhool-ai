@@ -1,0 +1,57 @@
+name: Deploy Haider Voice v2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
+      VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+      GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/haider-voice-v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify required secrets
+        run: |
+          test -n "$VERCEL_TOKEN" || (echo "VERCEL_TOKEN missing" && exit 1)
+          test -n "$TELEGRAM_BOT_TOKEN" || (echo "TELEGRAM_BOT_TOKEN missing" && exit 1)
+          test -n "$SAWTAK_API_KEY" || (echo "SAWTAK_API_KEY missing" && exit 1)
+
+      - name: Deploy production
+        run: |
+          ROOT=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" | jq -r '.rootDirectory // ""')
+          if [ "$ROOT" = "web" ]; then DIR=.; else DIR=web; fi
+          cd "$DIR"
+
+          ENVS=()
+          for K in GEMINI_API_KEY GEMINI_API_KEY_2 GEMINI_API_KEY_3 TELEGRAM_BOT_TOKEN SAWTAK_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY GH_DISPATCH_TOKEN; do
+            if [ -n "${!K}" ]; then ENVS+=(-e "$K=${!K}"); fi
+          done
+
+          npx --yes vercel@latest deploy --prod --yes             --token "$VERCEL_TOKEN" "${ENVS[@]}"
+
+      - name: Reconnect Telegram webhook
+        run: |
+          API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          SECRET=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+
+          curl -fsS "$API/setWebhook"             -H 'Content-Type: application/json'             -d "{\"url\":\"https://almajhool-ai.vercel.app/api/telegram\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\"],\"drop_pending_updates\":false}"             | jq -c '{ok,description}'
+
+          curl -fsS "$API/getWebhookInfo"             | jq -c '.result | {url,pending_update_count,last_error_message}'
