@@ -1,0 +1,56 @@
+name: Diagnose Haider audio integrity
+
+on:
+  push:
+    branches: ["diag/haider-audio-integrity"]
+    paths: [".github/workflows/diag-haider-audio.yml"]
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Generate exact Haider reply and inspect PCM/MP3
+        working-directory: web
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { sawtakTTSRaw } from "./api/_sawtak.js";
+          import { speak } from "./api/_voice.js";
+
+          const text = "وعليكم السلام، هلا بيك عيني، الحمد لله زين. إنت شلونك شخبارك؟";
+          const raw = await sawtakTTSRaw(text, { timeout: 90000 });
+          fs.writeFileSync("/tmp/haider.pcm", raw.pcm);
+          console.log("PCM_BYTES=" + raw.pcm.byteLength);
+          console.log("SAMPLE_RATE=" + raw.sampleRate);
+          console.log("PCM_SECONDS=" + (raw.pcm.byteLength / 2 / raw.sampleRate).toFixed(3));
+
+          const view = new DataView(raw.pcm.buffer, raw.pcm.byteOffset, raw.pcm.byteLength);
+          let peak = 0, sum2 = 0, n = Math.floor(raw.pcm.byteLength / 2);
+          for (let i = 0; i < n; i++) {
+            const s = view.getInt16(i*2, true);
+            peak = Math.max(peak, Math.abs(s));
+            sum2 += s*s;
+          }
+          console.log("PCM_PEAK=" + peak);
+          console.log("PCM_RMS=" + Math.sqrt(sum2/n).toFixed(1));
+
+          const out = await speak(text, "iraqi");
+          fs.writeFileSync("/tmp/haider.mp3", out.audio);
+          console.log("VOICE=" + out.voice);
+          console.log("MP3_BYTES=" + out.audio.length);
+          NODE
+
+          echo "--- MP3 probe ---"
+          ffprobe -v error -show_entries format=duration,bit_rate -of default=nw=1 /tmp/haider.mp3 || true
+          echo "--- Silence detect ---"
+          ffmpeg -hide_banner -i /tmp/haider.mp3 -af silencedetect=noise=-45dB:d=0.35 -f null - 2>&1 | grep -E 'silence_(start|end)' || true
+          echo "--- Volume detect ---"
+          ffmpeg -hide_banner -i /tmp/haider.mp3 -af volumedetect -f null - 2>&1 | grep -E 'mean_volume|max_volume' || true
