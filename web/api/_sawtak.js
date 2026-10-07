@@ -1,4 +1,5 @@
 // Sawtak Arabi client for Telegram voice notes.
+// Production redeploy marker: Haider PCM silence fix verified
 // Sawtak voice lookup, TTS and STT all use SAWTAK_API_KEY.
 const BASE = "https://api.sawtakarabi.ai/v1";
 let cachedHaiderId = "";
