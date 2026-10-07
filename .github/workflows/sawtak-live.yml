@@ -35,7 +35,7 @@ jobs:
             echo "HAIDER_NOT_FOUND"
             exit 3
           fi
-          CODE=$(curl -sS -o /tmp/haider.wav -w '%{http_code}'             'https://api.sawtakarabi.ai/v1/audio/speech'             -H "Authorization: Bearer $SAWTAK_API_KEY"             -H 'Content-Type: application/json'             -d "$(jq -nc --arg voice "$VID" --arg input 'هلو شلونك شخبارك'               '{model:"arabic-tts-1",voice:$voice,input:$input,response_format:"wav",sample_rate:24000}')")
+          CODE=$(curl -sS -o /tmp/haider.wav -w '%{http_code}'             'https://api.sawtakarabi.ai/v1/audio/speech'             -H "Authorization: Bearer $SAWTAK_API_KEY"             -H 'Content-Type: application/json'             -d "$(jq -nc --arg voice "$VID" --arg input 'هلو شلونك شخبارك'               '{model:"arabic-tts-1",voice:$voice,input:$input,response_format:"wav",sample_rate:24000,normalize_text:true,enhance_pronunciation:true}')")
           echo "TTS_HTTP=$CODE"
           echo "TTS_BYTES=$(wc -c < /tmp/haider.wav)"
           if [ "$CODE" != "200" ]; then
