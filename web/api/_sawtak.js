@@ -182,7 +182,7 @@ export async function sawtakTranscribe(audio, mime = "audio/ogg", { timeout = 45
 }
 
 
-export async function sawtakTTSJoined(text, { timeout = 45_000, retries = 1, maxChars = 260 } = {}) {
+export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, maxChars = 900 } = {}) {
   const chunks = splitIraqiTTS(text, maxChars);
   if (!chunks.length) throw new Error("Sawtak TTS text is empty");
 
