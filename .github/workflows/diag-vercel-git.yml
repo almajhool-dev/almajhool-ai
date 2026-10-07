@@ -18,10 +18,16 @@ jobs:
         shell: bash
         run: |
           J=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v13/deployments/$PREVIEW_ID?teamId=$VERCEL_ORG_ID")
-          echo "$J" | jq -c '{
-            id,url,readyState,
-            hasSawtak:([(.env // [])[]? | .key] | index("SAWTAK_API_KEY") != null),
-            hasTelegram:([(.env // [])[]? | .key] | index("TELEGRAM_BOT_TOKEN") != null),
-            hasGemini:([(.env // [])[]? | .key] | index("GEMINI_API_KEY") != null),
-            selectedEnvNames:[(.env // [])[]? | .key | select(.=="SAWTAK_API_KEY" or .=="TELEGRAM_BOT_TOKEN" or .=="GEMINI_API_KEY" or .=="OPENROUTER_API_KEY" or .=="MISTRAL_API_KEY")]
-          }'
+          echo "$J" | jq -c '
+            def envname:
+              if type=="string" then split("=")[0]
+              elif type=="object" then (.key // .name // "")
+              else "" end;
+            [(.env // [])[]? | envname] as $names
+            | {
+                id,url,readyState,
+                hasSawtak:($names | index("SAWTAK_API_KEY") != null),
+                hasTelegram:($names | index("TELEGRAM_BOT_TOKEN") != null),
+                hasGemini:($names | index("GEMINI_API_KEY") != null),
+                selectedEnvNames:[$names[] | select(.=="SAWTAK_API_KEY" or .=="TELEGRAM_BOT_TOKEN" or .=="GEMINI_API_KEY" or .=="OPENROUTER_API_KEY" or .=="MISTRAL_API_KEY")]
+              }'
