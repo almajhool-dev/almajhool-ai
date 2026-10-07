@@ -1,0 +1,22 @@
+name: Diagnose Vercel git deploy status
+
+on:
+  push:
+    branches: ["diag/vercel-git-deploy-status"]
+    paths: [".github/workflows/diag-vercel-git.yml"]
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
+      VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show recent Vercel deployments
+        shell: bash
+        run: |
+          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=12"             | jq -c '.deployments[] | {uid,url,state,createdAt,source,name,meta:{githubCommitSha:.meta.githubCommitSha,githubCommitRef:.meta.githubCommitRef,githubCommitMessage:.meta.githubCommitMessage}}'
+          echo "--- project git link ---"
+          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{name,rootDirectory,link,repo:(.link.repo // .link.repoId // null),type:(.link.type // null),productionBranch:(.link.productionBranch // null)}'
