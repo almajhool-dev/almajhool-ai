@@ -18,7 +18,7 @@ jobs:
         working-directory: web
         run: |
           node --input-type=module <<'NODE'
-          import { sawtakTTSRaw } from "./api/_sawtak.js";
+          import { sawtakTTSRaw, sawtakTTSJoined } from "./api/_sawtak.js";
           const r = await sawtakTTSRaw("وعليكم السلام، هلا بيك عيني، الحمد لله زين. إنت شلونك شخبارك؟", { timeout: 90000 });
           const pcm = r.pcm, rate = r.sampleRate;
           const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
@@ -39,6 +39,10 @@ jobs:
           }
           const text = "وعليكم السلام، هلا بيك عيني، الحمد لله زين. إنت شلونك شخبارك؟";
           const key = process.env.SAWTAK_API_KEY;
+          const joined = await sawtakTTSJoined("وعليكم السلام هلا بيك عيني الحمد لله زين إنت شلونك شخبارك", { timeout:90000, retries:2, maxWords:4, concurrency:2 });
+          console.log("JOINED_SECONDS="+joined.duration.toFixed(2)+" CHUNKS="+joined.chunks+" BYTES="+joined.pcm.byteLength);
+          if (joined.duration < 2 || joined.duration > 20) throw new Error("Joined Haider duration out of range: "+joined.duration);
+
           for (const format of ["wav","mp3"]) {
             const resp = await fetch("https://api.sawtakarabi.ai/v1/audio/speech", {
               method:"POST",
