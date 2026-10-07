@@ -1,5 +1,5 @@
 // Sawtak Arabi client for Telegram voice notes.
-// Public voice lookup is keyless; TTS/STT require SAWTAK_API_KEY.
+// Sawtak voice lookup, TTS and STT all use SAWTAK_API_KEY.
 const BASE = "https://api.sawtakarabi.ai/v1";
 let cachedHaiderId = "";
 
@@ -35,22 +35,22 @@ export async function sawtakHaiderVoiceId({ timeout = 10_000 } = {}) {
   if (pinned) return pinned;
   if (cachedHaiderId) return cachedHaiderId;
 
-  let after = "";
-  for (let page = 0; page < 5; page++) {
-    const url = new URL(`${BASE}/voices`);
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("sharing_status", "public");
-    if (after) url.searchParams.set("after", after);
-    const r = await fetch(url, { signal: AbortSignal.timeout(timeout) });
-    if (!r.ok) throw new Error(`sawtak voices HTTP ${r.status}: ${await errorText(r)}`);
-    const j = await r.json();
-    const id = sawtakVoiceIdFromList(j, "حيدر");
-    if (id) {
-      cachedHaiderId = id;
-      return id;
-    }
-    after = String(j?.next_cursor || j?.nextCursor || "");
-    if (!after) break;
+  const key = apiKey();
+  if (!key) throw new Error("SAWTAK_API_KEY not set");
+  const url = new URL(`${BASE}/voices`);
+  url.searchParams.set("search", "حيدر");
+  url.searchParams.set("limit", "10");
+  url.searchParams.set("sharing_status", "public");
+  const r = await fetch(url, {
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(timeout),
+  });
+  if (!r.ok) throw new Error(`sawtak voices HTTP ${r.status}: ${await errorText(r)}`);
+  const j = await r.json();
+  const id = sawtakVoiceIdFromList(j, "حيدر");
+  if (id) {
+    cachedHaiderId = id;
+    return id;
   }
   throw new Error("Sawtak voice حيدر not found or not ready");
 }
@@ -71,8 +71,6 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
       input,
       response_format: "pcm",
       sample_rate: 24000,
-      normalize_text: true,
-      enhance_pronunciation: true,
     }),
     signal: AbortSignal.timeout(timeout),
   });
