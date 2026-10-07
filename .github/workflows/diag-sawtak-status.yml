@@ -1,0 +1,30 @@
+name: Diagnose Sawtak current status
+
+on:
+  push:
+    branches: ["diag/sawtak-current-status"]
+    paths: [".github/workflows/diag-sawtak-status.yml"]
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check one tiny Haider synthesis
+        shell: bash
+        run: |
+          set -uo pipefail
+          BODY=/tmp/sawtak.out
+          HEAD=/tmp/sawtak.headers
+          CODE=$(curl -sS -D "$HEAD" -o "$BODY" -w '%{http_code}'             'https://api.sawtakarabi.ai/v1/audio/speech'             -H "Authorization: Bearer $SAWTAK_API_KEY"             -H 'Content-Type: application/json'             -d '{"model":"arabic-tts-1","voice":"380ef7b6-ffea-52fd-89bd-d661a9b01bcc","input":"هلا","response_format":"pcm","sample_rate":24000}')
+          echo "HTTP=$CODE"
+          grep -iE '^(x-error-code|x-request-id|content-type):' "$HEAD" || true
+          if [ "$CODE" = "200" ]; then
+            echo "BYTES=$(wc -c < "$BODY")"
+            exit 0
+          fi
+          echo "ERROR_BODY=$(head -c 800 "$BODY")"
+          exit 1
