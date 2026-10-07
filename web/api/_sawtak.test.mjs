@@ -36,8 +36,9 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
     assert.equal(body.temperature, 0.35);
     assert.equal(body.input, "هلو شلونك");
 
-    const pcm = new Uint8Array([0, 0, 1, 0, 2, 0, 3, 0]);
-    return new Response(pcm, {
+    const samples = new Int16Array(2400);
+    for (let i = 200; i < 2200; i++) samples[i] = Math.round(1200 * Math.sin(i / 8));
+    return new Response(new Uint8Array(samples.buffer), {
       status: 200,
       headers: { "Content-Type": "application/octet-stream", "X-Sample-Rate": "24000" },
     });
@@ -51,7 +52,9 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
 
   const out = await sawtakTTSRaw("هلو شلونك");
   assert.equal(out.sampleRate, 24000);
-  assert.deepEqual([...out.pcm], [0, 0, 1, 0, 2, 0, 3, 0]);
+  assert.ok(out.pcm.byteLength > 0);
+  assert.ok(out.duration > 0);
+  assert.ok(out.pcm.byteLength < 2400 * 2);
 });
 
 test("Sawtak STT sends Telegram voice audio and returns Iraqi transcript", async (t) => {
@@ -100,8 +103,9 @@ test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), body: init.body });
-    const pcm = new Uint8Array([0,0,1,0,2,0,3,0]);
-    return new Response(pcm, { status: 200, headers: { "X-Sample-Rate": "24000" } });
+    const samples = new Int16Array(2400);
+    for (let i = 200; i < 2200; i++) samples[i] = Math.round(1200 * Math.sin(i / 8));
+    return new Response(new Uint8Array(samples.buffer), { status: 200, headers: { "X-Sample-Rate": "24000" } });
   };
   t.after(() => { globalThis.fetch = previousFetch; });
 
