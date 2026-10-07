@@ -230,7 +230,11 @@ export async function speak(text, dialect = "iraqi") {
   if (!clean) throw new Error("نص فارغ");
   if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
     const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 75_000, retries: 1, maxChars: 900 });
-    return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
+    return {
+      audio: pcmToMp3(pcm, sampleRate),
+      voice: "sawtak/haider",
+      duration: pcm.byteLength / 2 / sampleRate,
+    };
   }
   // الأصوات القديمة تبقى احتياط فقط إذا Sawtak غير مفعّل أصلًا.
   try { return { audio: await geminiTTS(clean, dialect, { timeout: 12_000 }), voice: "gemini" }; }
