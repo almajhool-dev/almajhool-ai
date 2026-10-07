@@ -27,3 +27,9 @@ jobs:
       - name: Sawtak voice unit tests
         run: node --test api/_sawtak.test.mjs
         working-directory: web
+      - name: Check Telegram voice JavaScript syntax
+        run: |
+          node --check api/_sawtak.js
+          node --check api/_voice.js
+          node --check api/telegram.js
+        working-directory: web
