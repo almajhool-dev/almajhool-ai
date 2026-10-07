@@ -71,6 +71,9 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
       input,
       response_format: "pcm",
       sample_rate: 24000,
+      normalize_text: true,
+      enhance_pronunciation: true,
+      temperature: 0.35,
     }),
     signal: AbortSignal.timeout(timeout),
   });
