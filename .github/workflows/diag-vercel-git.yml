@@ -12,11 +12,16 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
+      TARGET_SHA: 7132c6a274dc3ee24d76487873c58cd4f9fa35e5
     steps:
       - uses: actions/checkout@v4
-      - name: Show recent Vercel deployments
+      - name: Find root-fix deployment and production target
         shell: bash
         run: |
-          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=12"             | jq -c '.deployments[] | {uid,url,state,createdAt,source,name,meta:{githubCommitSha:.meta.githubCommitSha,githubCommitRef:.meta.githubCommitRef,githubCommitMessage:.meta.githubCommitMessage}}'
-          echo "--- project git link ---"
-          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{name,rootDirectory,link,repo:(.link.repo // .link.repoId // null),type:(.link.type // null),productionBranch:(.link.productionBranch // null)}'
+          D=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=100")
+          echo "--- target commit deployments ---"
+          echo "$D" | jq -c --arg sha "$TARGET_SHA" '.deployments[] | select(.meta.githubCommitSha==$sha) | {uid,url,state,createdAt,source,target,meta:{githubCommitSha:.meta.githubCommitSha,githubCommitRef:.meta.githubCommitRef,githubCommitMessage:.meta.githubCommitMessage}}'
+          echo "--- latest main git deployments ---"
+          echo "$D" | jq -c '.deployments[] | select(.source=="git" and .meta.githubCommitRef=="main") | {uid,url,state,createdAt,source,target,sha:.meta.githubCommitSha,message:.meta.githubCommitMessage}' | head -n 12
+          echo "--- production aliases ---"
+          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{productionBranch:(.link.productionBranch // null),targets:(.targets.production // null)}'
