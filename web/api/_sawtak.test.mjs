@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 process.env.SAWTAK_API_KEY = "test-key";
 
 const sawtak = await import("./_sawtak.js");
-const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, splitIraqiTTS, sawtakTTSJoined } = sawtak;
+const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, prepareSawtakInput, cleanSawtakPcm, splitIraqiTTS, sawtakTTSJoined } = sawtak;
 
 test("selects the ready Haider Iraqi voice", () => {
   const id = sawtakVoiceIdFromList({
@@ -34,7 +34,7 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
     assert.equal(body.normalize_text, true);
     assert.equal(body.enhance_pronunciation, true);
     assert.equal(body.temperature, 0.35);
-    assert.equal(body.input, "هلو شلونك.");
+    assert.equal(body.input, "هلو شلونك");
 
     const pcm = new Uint8Array([0, 0, 1, 0, 2, 0, 3, 0]);
     return new Response(pcm, {
@@ -111,4 +111,26 @@ test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
   const out = await sawtakTTSJoined(text, { retries: 0 });
   assert.equal(calls.length, 1);
   assert.ok(out.pcm.byteLength > 0);
+});
+
+
+test("removes punctuation before Haider synthesis", () => {
+  assert.equal(
+    prepareSawtakInput("وعليكم السلام، هلا بيك عيني. إنت شلونك شخبارك؟"),
+    "وعليكم السلام هلا بيك عيني إنت شلونك شخبارك"
+  );
+});
+
+test("trims huge trailing silence and boosts quiet Haider PCM", () => {
+  const rate = 1000;
+  const seconds = 20;
+  const samples = new Int16Array(rate * seconds);
+  // 0.5s of silence, 2s of deliberately quiet speech, then 17.5s silence.
+  for (let i = 500; i < 2500; i++) samples[i] = Math.round(1200 * Math.sin(i / 9));
+  const bytes = new Uint8Array(samples.buffer);
+  const out = cleanSawtakPcm(bytes, rate);
+  assert.ok(out.duration > 2 && out.duration < 3);
+  assert.ok(out.gain > 1);
+  assert.ok(out.peakAfter > 10000);
+  assert.ok(out.pcm.byteLength < bytes.byteLength / 4);
 });
