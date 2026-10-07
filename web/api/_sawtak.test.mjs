@@ -98,7 +98,7 @@ test("splits long Iraqi replies into short speech chunks", () => {
 });
 
 
-test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
+test("splits Haider synthesis into short word chunks and rejoins them", async (t) => {
   const previousFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -109,12 +109,16 @@ test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
   };
   t.after(() => { globalThis.fetch = previousFetch; });
 
-  const phrase = "هلو عيني شلونك، آني حاضر وياك وكلشي تمام، وإذا تريد أي شي گلي وأنا أساعدك هسه. ";
-  const text = phrase.repeat(5).trim();
-  assert.ok(text.length > 260 && text.length < 900);
-  const out = await sawtakTTSJoined(text, { retries: 0 });
-  assert.equal(calls.length, 1);
+  const text = "وعليكم السلام هلا بيك عيني الحمد لله زين إنت شلونك شخبارك";
+  const out = await sawtakTTSJoined(text, { retries: 0, maxWords: 4 });
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    const body = JSON.parse(call.body);
+    assert.ok(body.input.split(/\s+/).length <= 4);
+    assert.ok(!/[.!?,،؛;:؟…]/u.test(body.input));
+  }
   assert.ok(out.pcm.byteLength > 0);
+  assert.equal(out.chunks, 3);
 });
 
 
