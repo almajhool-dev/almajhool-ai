@@ -163,7 +163,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   await action(chat_id, voice ? "record_voice" : "typing");
   const history = recent(state);
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
-  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. خلي الرد من جملتين إلى أربع جمل قصيرة، وبفواصل ونقاط طبيعية حتى النطق يطلع واضح. لا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
+  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. إذا السؤال سلام أو سوالف بسيطة مثل «شلونك، شخبارك، شتسوي» جاوب بجملة وحدة أو جملتين فقط وبحد أقصى 25 كلمة. باقي الأسئلة خلي جوابك الصوتي مختصر، من جملتين إلى ثلاث جمل قصيرة فقط. استخدم فواصل ونقاط طبيعية حتى النطق يطلع واضح. لا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
   let answer = "";
   try {
@@ -172,7 +172,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     // رد سريع: البصمة (لازم تكون فورية) والسوالف القصيرة — نموذج سريع واحد بدل انتظار كل النماذج
     const quick = provider === "auto" && !factual && (voice || (text.length < 60 && !/\n/.test(text)));
     if (quick) {
-      try { answer = await directText(messages, { max_tokens: voice ? 220 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
+      try { answer = await directText(messages, { max_tokens: voice ? 80 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
       catch (e) { console.error("quick", e.message); }
     }
     // سؤال عن حقيقة بالبصمة: نجاوب من البحث مباشرة (أسرع من تجميع كل النماذج)
@@ -188,18 +188,22 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     if (!answer && provider === "auto" && needsSearch(text)) {
       try { answer = (await searchAnswer(text, { history })).text; } catch (e) { console.error("search", e.message); }
     }
-    if (!answer) answer = await directText(messages, { max_tokens: voice ? 240 : 4096, timeout: 60_000, provider });
+    if (!answer) answer = await directText(messages, { max_tokens: voice ? 100 : 4096, timeout: 60_000, provider });
   } catch {
-    const r = await gateway("/api/chat", { messages, max_tokens: voice ? 240 : 4096 });
+    const r = await gateway("/api/chat", { messages, max_tokens: voice ? 100 : 4096 });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return send(chat_id, "صار خلل بالنماذج، جرّب بعد شوية 🙏");
     answer = d.text || "";
   }
   answer = String(answer).replace(/^\s*\[[^\]\n]{3,300}\]\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim() || answer; // ما نخلي النموذج يدّعي إنه سوى شي
-  if (voice && answer.length > 700) {
-    const head = answer.slice(0, 700);
-    const cut = Math.max(head.lastIndexOf("."), head.lastIndexOf("؟"), head.lastIndexOf("!"), head.lastIndexOf("،"));
-    answer = (cut > 300 ? head.slice(0, cut + 1) : head).trim();
+  if (voice) {
+    const casual = /^(هلو|هلا|السلام|سلام|شلونك|شخبارك|شلونكم|شكو|شنو الاخبار|صباح|مساء)/i.test(text.trim());
+    const maxChars = casual ? 140 : 360;
+    if (answer.length > maxChars) {
+      const head = answer.slice(0, maxChars);
+      const cut = Math.max(head.lastIndexOf("."), head.lastIndexOf("؟"), head.lastIndexOf("!"), head.lastIndexOf("،"));
+      answer = (cut > Math.floor(maxChars * 0.45) ? head.slice(0, cut + 1) : head).trim();
+    }
   }
   let spoken = false;
   if (voice) {
