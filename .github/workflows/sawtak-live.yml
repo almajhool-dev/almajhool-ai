@@ -24,7 +24,11 @@ jobs:
             echo "SAWTAK_KEY_MISSING"
             exit 2
           fi
-          VOICES=$(curl -fsS --get 'https://api.sawtakarabi.ai/v1/voices'             --data-urlencode 'search=حيدر' --data-urlencode 'limit=10' --data-urlencode 'sharing_status=public')
+          VOICES=$(curl -fsS --get 'https://api.sawtakarabi.ai/v1/voices' \
+            -H "Authorization: Bearer $SAWTAK_API_KEY" \
+            --data-urlencode 'search=حيدر' \
+            --data-urlencode 'limit=10' \
+            --data-urlencode 'sharing_status=public')
           echo "$VOICES" | jq -c '{matches:[.data[]? | {id,name,status,labels}]}'
           VID=$(echo "$VOICES" | jq -r '.data[]? | select(.name=="حيدر" and .status=="ready") | .id' | head -1)
           if [ -z "$VID" ]; then
