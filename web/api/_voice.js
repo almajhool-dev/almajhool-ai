@@ -229,7 +229,7 @@ export async function speak(text, dialect = "iraqi") {
   const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
   if (!clean) throw new Error("نص فارغ");
   if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
-    const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 75_000, retries: 1, maxWords: 4 });
+    const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 75_000, retries: 3, maxWords: 4, concurrency: 2 });
     return {
       audio: pcmToMp3(pcm, sampleRate),
       voice: "sawtak/haider",
