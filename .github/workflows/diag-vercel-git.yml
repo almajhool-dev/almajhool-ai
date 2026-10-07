@@ -12,16 +12,15 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
       VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
-      TARGET_SHA: 7132c6a274dc3ee24d76487873c58cd4f9fa35e5
+      PREVIEW_ID: dpl_C8dvjAETQr7CBVKdreNanpzESLe6
     steps:
       - uses: actions/checkout@v4
-      - name: Find root-fix deployment and production target
+      - name: Inspect preview deployment environment metadata
         shell: bash
         run: |
-          D=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=100")
-          echo "--- target commit deployments ---"
-          echo "$D" | jq -c --arg sha "$TARGET_SHA" '.deployments[] | select(.meta.githubCommitSha==$sha) | {uid,url,state,createdAt,source,target,meta:{githubCommitSha:.meta.githubCommitSha,githubCommitRef:.meta.githubCommitRef,githubCommitMessage:.meta.githubCommitMessage}}'
-          echo "--- latest main git deployments ---"
-          echo "$D" | jq -c '.deployments[] | select(.source=="git" and .meta.githubCommitRef=="main") | {uid,url,state,createdAt,source,target,sha:.meta.githubCommitSha,message:.meta.githubCommitMessage}' | head -n 12
-          echo "--- production aliases ---"
-          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{productionBranch:(.link.productionBranch // null),targets:(.targets.production // null)}'
+          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v13/deployments/$PREVIEW_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{
+                id,url,readyState,target,source,
+                meta:{sha:.meta.githubCommitSha,ref:.meta.githubCommitRef},
+                envKeys:((.env // {})|keys),
+                buildEnvKeys:((.build.env // .buildEnv // {})|keys)
+              }'
