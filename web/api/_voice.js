@@ -4,6 +4,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { Mp3Encoder } from "@breezystack/lamejs";
+import { sawtakTTSRaw, sawtakTranscribe } from "./_sawtak.js";
 // مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
 {
   const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
@@ -27,6 +28,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** يرجع { transcript, dialect } من ملف صوت (Buffer) */
 export async function transcribe(audio, mime = "audio/ogg") {
+  // Sawtak first for Telegram audio; if it is unavailable, keep the existing listener as fallback.
+  if (process.env.SAWTAK_API_KEY && /^audio\//i.test(mime)) {
+    try { return await sawtakTranscribe(audio, mime, { timeout: 20_000 }); }
+    catch (e) { console.error("sawtak stt", e.message); }
+  }
   const prompt = `Listen to this voice message. Return ONLY JSON: {"transcript": "...", "dialect": "..."}
 - transcript: exactly what the speaker said, in the original language and dialect, written in its own script (Arabic dialects in Arabic letters, keep dialect words as spoken, do not translate or correct to MSA).
 - dialect: one of iraqi, gulf, saudi, egyptian, levantine, maghrebi, sudanese, yemeni, msa, english, other.`;
@@ -225,7 +231,13 @@ export const normalizeForTTS = (t) => String(t).replace(/گ/g, "ك").replace(/چ
 export async function speak(text, dialect = "iraqi") {
   const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
   if (!clean) throw new Error("نص فارغ");
-  // 1) Gemini يحچي اللهجة طبيعي  2) أصوات Edge  3) Google
+  if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
+    try {
+      const { pcm, sampleRate } = await sawtakTTSRaw(clean, { timeout: 35_000 });
+      return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
+    } catch (e) { console.error("sawtak tts", e.message); }
+  }
+  // Sawtak/حيدر أولاً للعراقي، وبعده Gemini ثم Edge ثم Google كاحتياط.
   try { return { audio: await geminiTTS(clean, dialect, { timeout: 12_000 }), voice: "gemini" }; }
   catch (e) { console.error("gemini tts", e.message); }
   const voice = VOICES[dialect] || VOICES.other;

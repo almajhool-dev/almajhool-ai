@@ -1,0 +1,35 @@
+name: Sawtak Haider voice unit
+
+on:
+  push:
+    branches: ["feature/sawtak-haider-telegram"]
+    paths:
+      - "web/api/_sawtak.js"
+      - "web/api/_sawtak.test.mjs"
+      - "web/api/_voice.js"
+      - ".github/workflows/sawtak-unit.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "web/api/_sawtak.js"
+      - "web/api/_sawtak.test.mjs"
+      - "web/api/_voice.js"
+      - ".github/workflows/sawtak-unit.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Sawtak voice unit tests
+        run: node --test api/_sawtak.test.mjs
+        working-directory: web
+      - name: Check Telegram voice JavaScript syntax
+        run: |
+          node --check api/_sawtak.js
+          node --check api/_voice.js
+          node --check api/telegram.js
+        working-directory: web
