@@ -11,16 +11,17 @@ jobs:
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
-      VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
       PREVIEW_ID: dpl_C8dvjAETQr7CBVKdreNanpzESLe6
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect preview deployment environment metadata
+      - name: Check required env names on preview
         shell: bash
         run: |
-          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v13/deployments/$PREVIEW_ID?teamId=$VERCEL_ORG_ID"             | jq -c '{
-                id,url,readyState,target,source,
-                meta:{sha:.meta.githubCommitSha,ref:.meta.githubCommitRef},
-                envKeys:((.env // {})|keys),
-                buildEnvKeys:((.build.env // .buildEnv // {})|keys)
-              }'
+          J=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN"             "https://api.vercel.com/v13/deployments/$PREVIEW_ID?teamId=$VERCEL_ORG_ID")
+          echo "$J" | jq -c '{
+            id,url,readyState,
+            hasSawtak:([(.env // [])[]? | .key] | index("SAWTAK_API_KEY") != null),
+            hasTelegram:([(.env // [])[]? | .key] | index("TELEGRAM_BOT_TOKEN") != null),
+            hasGemini:([(.env // [])[]? | .key] | index("GEMINI_API_KEY") != null),
+            selectedEnvNames:[(.env // [])[]? | .key | select(.=="SAWTAK_API_KEY" or .=="TELEGRAM_BOT_TOKEN" or .=="GEMINI_API_KEY" or .=="OPENROUTER_API_KEY" or .=="MISTRAL_API_KEY")]
+          }'
