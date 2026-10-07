@@ -75,14 +75,24 @@ async function sendDocument(chat_id, buffer, mime, filename, caption) {
   if (!j.ok) throw new Error(j.description || "sendDocument failed");
 }
 
-async function sendVoice(chat_id, buffer, caption) {
-  const fd = new FormData();
-  fd.append("chat_id", String(chat_id));
-  fd.append("voice", new Blob([buffer], { type: "audio/mpeg" }), "reply.mp3");
-  if (caption) fd.append("caption", caption.slice(0, 1024));
-  const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, { method: "POST", body: fd });
-  const j = await r.json().catch(() => ({}));
-  if (!j.ok) throw new Error(j.description || "sendVoice failed");
+async function sendVoice(chat_id, buffer, caption = "") {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = new FormData();
+      fd.append("chat_id", String(chat_id));
+      fd.append("voice", new Blob([buffer], { type: "audio/mpeg" }), "reply.mp3");
+      if (caption) fd.append("caption", caption.slice(0, 1024));
+      const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, { method: "POST", body: fd });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.description || "sendVoice failed");
+      return j.result;
+    } catch (e) {
+      lastError = e;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw lastError || new Error("sendVoice failed");
 }
 
 /** نص طويل يتقسم على عدة رسائل، ونشيل رموز Markdown حتى يطلع نظيف */
@@ -191,10 +201,12 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     try {
       await action(chat_id, "record_voice");
       const { audio } = await speak(answer, voice);
-      const caption = cleanText(answer);
-      await sendVoice(chat_id, audio, caption.length <= 1000 ? caption : "");
+      await sendVoice(chat_id, audio);
       spoken = true;
-    } catch (e) { console.error("voice reply", e.message); }
+    } catch (e) {
+      console.error("voice reply", e.message);
+      return send(chat_id, "ما گدرت أطلع البصمة هسه، دزها مرة ثانية.");
+    }
   }
   if (!spoken) await sendLong(chat_id, answer);
   await remember(chat_id, state, [{ role: "user", content: text }, { role: "assistant", content: answer }]);
@@ -235,8 +247,14 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
   catch (e) { console.error("vision", e.message); return send(chat_id, "ما گدرت أشوف الصورة هسه، جرّب بعد شوية 🙏"); }
   let spoken = false;
   if (voice) {
-    try { const { audio } = await speak(answer, voice); await sendVoice(chat_id, audio, cleanText(answer).slice(0, 1000)); spoken = true; }
-    catch (e) { console.error("voice reply", e.message); }
+    try {
+      const { audio } = await speak(answer, voice);
+      await sendVoice(chat_id, audio);
+      spoken = true;
+    } catch (e) {
+      console.error("voice reply", e.message);
+      return send(chat_id, "ما گدرت أطلع البصمة هسه، دزها مرة ثانية.");
+    }
   }
   if (!spoken) await sendLong(chat_id, answer);
   await remember(chat_id, state, [{ role: "user", content: `[عن الصورة] ${text || "شنو بهاي الصورة؟"}` }, { role: "assistant", content: answer }], { kind: "image" });
@@ -474,7 +492,10 @@ async function handleMessage(update) {
   let provider = "auto";
   if (GPT_REQ.test(text) && text.replace(GPT_REQ, "").trim().length > 2) { provider = [...GPT_IDS, "gemini"]; text = text.replace(GPT_REQ, "").trim(); }
   if (provider === "auto" && ASKS_ABOUT.test(text)) {
-    if (voice) { try { return await sendVoice(chat_id, (await speak("تم بنائي بواسطة المبرمج المجهول", voice)).audio, ABOUT); } catch { } }
+    if (voice) {
+      try { return await sendVoice(chat_id, (await speak("تم بنائي بواسطة المبرمج المجهول", voice)).audio); }
+      catch (e) { console.error("voice reply", e.message); return send(chat_id, "ما گدرت أطلع البصمة هسه، دزها مرة ثانية."); }
+    }
     return send(chat_id, ABOUT);
   }
   if (/^\/new\b/i.test(text)) {
