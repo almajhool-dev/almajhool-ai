@@ -33,6 +33,7 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
     assert.equal(body.sample_rate, 24000);
     assert.equal(body.normalize_text, true);
     assert.equal(body.enhance_pronunciation, true);
+    assert.equal(body.temperature, 0.35);
     assert.equal(body.input, "هلو شلونك");
 
     const pcm = new Uint8Array([0, 0, 1, 0, 2, 0, 3, 0]);
