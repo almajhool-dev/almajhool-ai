@@ -41,6 +41,14 @@ jobs:
           }
           console.log("PCM_PEAK=" + peak);
           console.log("PCM_RMS=" + Math.sqrt(sum2/n).toFixed(1));
+          for (const th of [5,10,20,30,50,80,100,150,200,300]) {
+            let first = -1, last = -1;
+            for (let i = 0; i < n; i++) {
+              const s = Math.abs(view.getInt16(i*2, true));
+              if (s >= th) { if (first < 0) first = i; last = i; }
+            }
+            console.log("ACTIVE_" + th + "=" + (first < 0 ? "none" : (first/raw.sampleRate).toFixed(3) + ".." + (last/raw.sampleRate).toFixed(3)));
+          }
 
           const out = await speak(text, "iraqi");
           fs.writeFileSync("/tmp/haider.mp3", out.audio);
