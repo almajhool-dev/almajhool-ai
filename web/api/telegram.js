@@ -163,7 +163,7 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   if (user.role !== "admin" && usage.tokens >= user.daily_tokens) return send(chat_id, "وصلت حدك اليومي من التوكنات. يتجدد غدًا 🌙");
   await action(chat_id, voice ? "record_voice" : "typing");
   const history = recent(state);
-  const voiceSmallTalk = Boolean(voice && text.length <= 90 && /^(?:هلا|هلو|السلام|سلام|شلونك|شخبارك|شلونكم|شخباركم|صباح الخير|مساء الخير|هاي|hello|hi)\b/iu.test(String(text).trim()));
+  const voiceSmallTalk = Boolean(voice && text.length <= 90 && /^(?:هلا|هلو|السلام|سلام|شلونك|شخبارك|شلونكم|شخباركم|صباح الخير|مساء الخير|هاي|hello|hi)(?:\s|$|[؟?!.,،])/iu.test(String(text).trim()));
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
   const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. إذا كلام المستخدم مجرد تحية أو سوالف قصيرة مثل «شلونك شخبارك»، رد بجملة عراقية وحدة قصيرة جدًا من 4 إلى 12 كلمة. إذا يحتاج جواب عادي خليها جملة أو جملتين، وإذا يحتاج شرح فعلي لا تتجاوز ثلاث جمل قصيرة. استخدم فواصل ونقاط طبيعية بالنص، ولا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
