@@ -7,6 +7,12 @@ on:
       - "web/api/_voice.js"
       - "web/api/_voice.sawtak.test.mjs"
       - ".github/workflows/sawtak-unit.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "web/api/_voice.js"
+      - "web/api/_voice.sawtak.test.mjs"
+      - ".github/workflows/sawtak-unit.yml"
   workflow_dispatch:
 
 jobs:
