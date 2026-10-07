@@ -1,0 +1,24 @@
+name: Diagnose production voice error
+
+on:
+  push:
+    branches: ["diag/vercel-voice-logs"]
+    paths: [".github/workflows/diag-vercel-voice.yml"]
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_NBBbzX5kmVSyPFgEVJL6FHUZ
+      VERCEL_PROJECT_ID: prj_hBLuwRudiTRyj4cCilx8CdvbmmaX
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Fetch recent production voice logs
+        shell: bash
+        run: |
+          set -o pipefail
+          cd web
+          npx --yes vercel@latest logs             --token "$VERCEL_TOKEN"             --scope "$VERCEL_ORG_ID"             --project "$VERCEL_PROJECT_ID"             --since 2h             --query "voice reply"             --json 2>&1 | tail -n 120
