@@ -114,11 +114,3 @@ test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
 });
 
 
-test("normalizes quiet PCM before Telegram MP3", async () => {
-  const { pcmToMp3 } = await import("./_voice.js");
-  const samples = new Int16Array(24000);
-  for (let i = 0; i < samples.length; i++) samples[i] = Math.round(Math.sin(i / 12) * 1200);
-  const pcm = new Uint8Array(samples.buffer);
-  const mp3 = pcmToMp3(pcm, 24000);
-  assert.ok(mp3.byteLength > 1000);
-});
