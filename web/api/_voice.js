@@ -4,7 +4,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { Mp3Encoder } from "@breezystack/lamejs";
-import { sawtakTTSRaw, sawtakTranscribe } from "./_sawtak.js";
+import { sawtakTTSJoined, sawtakTranscribe } from "./_sawtak.js";
 // مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
 {
   const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
@@ -232,7 +232,7 @@ export async function speak(text, dialect = "iraqi") {
   const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
   if (!clean) throw new Error("نص فارغ");
   if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
-    const { pcm, sampleRate } = await sawtakTTSRaw(clean, { timeout: 35_000 });
+    const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 35_000, retries: 1, maxChars: 260 });
     return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
   }
   // الأصوات القديمة تبقى احتياط فقط إذا Sawtak غير مفعّل أصلًا.

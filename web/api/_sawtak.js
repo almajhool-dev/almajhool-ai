@@ -2,6 +2,7 @@
 // Sawtak voice lookup, TTS and STT all use SAWTAK_API_KEY.
 const BASE = "https://api.sawtakarabi.ai/v1";
 let cachedHaiderId = "";
+const DEFAULT_HAIDER_VOICE_ID = "380ef7b6-ffea-52fd-89bd-d661a9b01bcc";
 
 const apiKey = () => String(process.env.SAWTAK_API_KEY || "").trim();
 
@@ -24,6 +25,47 @@ export function prepareIraqiTTS(text) {
 
   if (!/[.!؟!]$/u.test(s)) s += ".";
   return s;
+}
+
+export function splitIraqiTTS(text, maxChars = 260) {
+  const clean = prepareIraqiTTS(text);
+  if (!clean) return [];
+  if (clean.length <= maxChars) return [clean];
+
+  const pieces = clean.match(/[^.؟!،]+[.؟!،]?/gu) || [clean];
+  const out = [];
+  let current = "";
+
+  const pushWords = (segment) => {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    let part = "";
+    for (const word of words) {
+      const next = part ? part + " " + word : word;
+      if (next.length > maxChars && part) {
+        out.push(part.trim());
+        part = word;
+      } else {
+        part = next;
+      }
+    }
+    if (part) return part.trim();
+    return "";
+  };
+
+  for (const raw of pieces) {
+    const piece = raw.trim();
+    if (!piece) continue;
+    const next = current ? current + " " + piece : piece;
+    if (next.length <= maxChars) {
+      current = next;
+      continue;
+    }
+    if (current) out.push(current.trim());
+    if (piece.length <= maxChars) current = piece;
+    else current = pushWords(piece);
+  }
+  if (current) out.push(current.trim());
+  return out.filter(Boolean);
 }
 
 function rowsOf(payload) {
@@ -52,7 +94,7 @@ async function errorText(r) {
 }
 
 export async function sawtakHaiderVoiceId({ timeout = 10_000 } = {}) {
-  const pinned = String(process.env.SAWTAK_HAIDER_VOICE_ID || "").trim();
+  const pinned = String(process.env.SAWTAK_HAIDER_VOICE_ID || DEFAULT_HAIDER_VOICE_ID).trim();
   if (pinned) return pinned;
   if (cachedHaiderId) return cachedHaiderId;
 
@@ -137,4 +179,46 @@ export async function sawtakTranscribe(audio, mime = "audio/ogg", { timeout = 45
   const transcript = String(j?.text || "").trim();
   if (!transcript) throw new Error("sawtak stt: empty transcript");
   return { transcript, dialect: "iraqi" };
+}
+
+
+export async function sawtakTTSJoined(text, { timeout = 45_000, retries = 1, maxChars = 260 } = {}) {
+  const chunks = splitIraqiTTS(text, maxChars);
+  if (!chunks.length) throw new Error("Sawtak TTS text is empty");
+
+  const parts = [];
+  let sampleRate = 24000;
+  let voice = DEFAULT_HAIDER_VOICE_ID;
+
+  for (const chunk of chunks) {
+    let result = null;
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        result = await sawtakTTSRaw(chunk, { timeout });
+        break;
+      } catch (e) {
+        lastError = e;
+        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+    if (!result) throw lastError || new Error("Sawtak TTS failed");
+    sampleRate = result.sampleRate || sampleRate;
+    voice = result.voice || voice;
+    parts.push(result.pcm);
+  }
+
+  const silence = new Uint8Array(Math.round(sampleRate * 0.12) * 2);
+  const total = parts.reduce((n, p) => n + p.byteLength, 0) + Math.max(0, parts.length - 1) * silence.byteLength;
+  const pcm = new Uint8Array(total);
+  let offset = 0;
+  parts.forEach((part, i) => {
+    pcm.set(part, offset);
+    offset += part.byteLength;
+    if (i < parts.length - 1) {
+      pcm.set(silence, offset);
+      offset += silence.byteLength;
+    }
+  });
+  return { pcm, sampleRate, voice };
 }
