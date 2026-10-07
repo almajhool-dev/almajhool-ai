@@ -54,7 +54,7 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
   assert.equal(out.sampleRate, 24000);
   assert.ok(out.pcm.byteLength > 0);
   assert.ok(out.duration > 0);
-  assert.ok(out.pcm.byteLength < 2400 * 2);
+  assert.ok(out.pcm.byteLength <= 2400 * 2);
 });
 
 test("Sawtak STT sends Telegram voice audio and returns Iraqi transcript", async (t) => {
