@@ -224,7 +224,7 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
     peakBefore: cleaned.peakBefore,
     peakAfter: cleaned.peakAfter,
   });
-  return { pcm: cleaned.pcm, sampleRate, voice, duration: cleaned.duration };
+  return { pcm: cleaned.pcm, sampleRate, voice, duration: cleaned.duration, rawDuration: cleaned.rawDuration };
 }
 
 function extForMime(mime) {
