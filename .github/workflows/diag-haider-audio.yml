@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Test Haider without continuation
+      - name: Test Haider WAV output
         working-directory: web
         run: |
           node --input-type=module <<'NODE'
@@ -25,24 +25,41 @@ jobs:
             method:"POST",
             headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},
             body:JSON.stringify({
-              model:"arabic-tts-1",voice,input,response_format:"pcm",sample_rate:24000,
-              normalize_text:true,enhance_pronunciation:true,temperature:0.35,use_continuation:false
+              model:"arabic-tts-1",voice,input,response_format:"wav",sample_rate:24000,
+              normalize_text:true,enhance_pronunciation:true,temperature:0.35
             }),
             signal:AbortSignal.timeout(90000)
           });
           if(!r.ok) throw new Error(r.status+" "+(await r.text()));
-          const rate=Number(r.headers.get("x-sample-rate")||24000);
           const bytes=new Uint8Array(await r.arrayBuffer());
-          const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-          const n=Math.floor(bytes.byteLength/2);
+          console.log("CONTENT_TYPE="+r.headers.get("content-type"));
+          console.log("BYTES="+bytes.byteLength);
+          console.log("HEAD="+String.fromCharCode(...bytes.slice(0,4)));
+          // Find the WAV data chunk instead of assuming a fixed 44-byte header.
+          let off=12, data=null, rate=24000, bits=16, channels=1;
+          const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+          while(off+8<=bytes.length){
+            const id=String.fromCharCode(...bytes.slice(off,off+4));
+            const size=dv.getUint32(off+4,true);
+            if(id==="fmt " && size>=16){
+              channels=dv.getUint16(off+10,true);
+              rate=dv.getUint32(off+12,true);
+              bits=dv.getUint16(off+22,true);
+            }
+            if(id==="data"){ data=bytes.slice(off+8,Math.min(bytes.length,off+8+size)); break; }
+            off+=8+size+(size%2);
+          }
+          if(!data) throw new Error("no WAV data chunk");
+          const pv=new DataView(data.buffer,data.byteOffset,data.byteLength);
+          const n=Math.floor(data.byteLength/2);
           let peak=0,first=-1,last=-1;
           for(let i=0;i<n;i++){
-            const a=Math.abs(view.getInt16(i*2,true));
+            const a=Math.abs(pv.getInt16(i*2,true));
             peak=Math.max(peak,a);
             if(a>=20){if(first<0)first=i;last=i;}
           }
           console.log(JSON.stringify({
-            status:r.status,bytes:bytes.byteLength,rate,
+            rate,bits,channels,dataBytes:data.byteLength,
             total:(n/rate).toFixed(3),
             active:first<0?"none":(first/rate).toFixed(3)+".."+(last/rate).toFixed(3),
             activeSeconds:first<0?0:((last-first+1)/rate).toFixed(3),
