@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 process.env.SAWTAK_API_KEY = "test-key";
 
 const sawtak = await import("./_sawtak.js");
-const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, splitIraqiTTS, sawtakTTSJoined } = sawtak;
+const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, prepareSawtakInput, cleanSawtakPcm, splitIraqiTTS, sawtakTTSJoined } = sawtak;
 
 test("selects the ready Haider Iraqi voice", () => {
   const id = sawtakVoiceIdFromList({
@@ -34,10 +34,11 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
     assert.equal(body.normalize_text, true);
     assert.equal(body.enhance_pronunciation, true);
     assert.equal(body.temperature, 0.35);
-    assert.equal(body.input, "هلو شلونك.");
+    assert.equal(body.input, "هلو شلونك");
 
-    const pcm = new Uint8Array([0, 0, 1, 0, 2, 0, 3, 0]);
-    return new Response(pcm, {
+    const samples = new Int16Array(2400);
+    for (let i = 200; i < 2200; i++) samples[i] = Math.round(1200 * Math.sin(i / 8));
+    return new Response(new Uint8Array(samples.buffer), {
       status: 200,
       headers: { "Content-Type": "application/octet-stream", "X-Sample-Rate": "24000" },
     });
@@ -51,7 +52,9 @@ test("Sawtak TTS requests Haider and returns raw PCM plus sample rate", async (t
 
   const out = await sawtakTTSRaw("هلو شلونك");
   assert.equal(out.sampleRate, 24000);
-  assert.deepEqual([...out.pcm], [0, 0, 1, 0, 2, 0, 3, 0]);
+  assert.ok(out.pcm.byteLength > 0);
+  assert.ok(out.duration > 0);
+  assert.ok(out.pcm.byteLength <= 2400 * 2);
 });
 
 test("Sawtak STT sends Telegram voice audio and returns Iraqi transcript", async (t) => {
@@ -95,20 +98,47 @@ test("splits long Iraqi replies into short speech chunks", () => {
 });
 
 
-test("keeps a normal Telegram voice reply in one Sawtak request", async (t) => {
+test("splits Haider synthesis into short word chunks and rejoins them", async (t) => {
   const previousFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), body: init.body });
-    const pcm = new Uint8Array([0,0,1,0,2,0,3,0]);
-    return new Response(pcm, { status: 200, headers: { "X-Sample-Rate": "24000" } });
+    const samples = new Int16Array(2400);
+    for (let i = 200; i < 2200; i++) samples[i] = Math.round(1200 * Math.sin(i / 8));
+    return new Response(new Uint8Array(samples.buffer), { status: 200, headers: { "X-Sample-Rate": "24000" } });
   };
   t.after(() => { globalThis.fetch = previousFetch; });
 
-  const phrase = "هلو عيني شلونك، آني حاضر وياك وكلشي تمام، وإذا تريد أي شي گلي وأنا أساعدك هسه. ";
-  const text = phrase.repeat(5).trim();
-  assert.ok(text.length > 260 && text.length < 900);
-  const out = await sawtakTTSJoined(text, { retries: 0 });
-  assert.equal(calls.length, 1);
+  const text = "وعليكم السلام هلا بيك عيني الحمد لله زين إنت شلونك شخبارك";
+  const out = await sawtakTTSJoined(text, { retries: 0, maxWords: 4 });
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    const body = JSON.parse(call.body);
+    assert.ok(body.input.split(/\s+/).length <= 4);
+    assert.ok(!/[.!?,،؛;:؟…]/u.test(body.input));
+  }
   assert.ok(out.pcm.byteLength > 0);
+  assert.equal(out.chunks, 3);
+});
+
+
+test("removes punctuation before Haider synthesis", () => {
+  assert.equal(
+    prepareSawtakInput("وعليكم السلام، هلا بيك عيني. إنت شلونك شخبارك؟"),
+    "وعليكم السلام هلا بيك عيني إنت شلونك شخبارك"
+  );
+});
+
+test("trims huge trailing silence and boosts quiet Haider PCM", () => {
+  const rate = 1000;
+  const seconds = 20;
+  const samples = new Int16Array(rate * seconds);
+  // 0.5s of silence, 2s of deliberately quiet speech, then 17.5s silence.
+  for (let i = 500; i < 2500; i++) samples[i] = Math.round(1200 * Math.sin(i / 9));
+  const bytes = new Uint8Array(samples.buffer);
+  const out = cleanSawtakPcm(bytes, rate);
+  assert.ok(out.duration > 2 && out.duration < 3);
+  assert.ok(out.gain > 1);
+  assert.ok(out.peakAfter > 10000);
+  assert.ok(out.pcm.byteLength < bytes.byteLength / 4);
 });

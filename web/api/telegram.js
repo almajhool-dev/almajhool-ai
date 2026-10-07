@@ -75,7 +75,7 @@ async function sendDocument(chat_id, buffer, mime, filename, caption) {
   if (!j.ok) throw new Error(j.description || "sendDocument failed");
 }
 
-async function sendVoice(chat_id, buffer, caption = "") {
+async function sendVoice(chat_id, buffer, caption = "", duration = null) {
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -83,6 +83,7 @@ async function sendVoice(chat_id, buffer, caption = "") {
       fd.append("chat_id", String(chat_id));
       fd.append("voice", new Blob([buffer], { type: "audio/mpeg" }), "reply.mp3");
       if (caption) fd.append("caption", caption.slice(0, 1024));
+      if (Number.isFinite(duration) && duration > 0) fd.append("duration", String(Math.max(1, Math.ceil(duration))));
       const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, { method: "POST", body: fd });
       const j = await r.json().catch(() => ({}));
       if (!j.ok) throw new Error(j.description || "sendVoice failed");
@@ -162,17 +163,20 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   if (user.role !== "admin" && usage.tokens >= user.daily_tokens) return send(chat_id, "وصلت حدك اليومي من التوكنات. يتجدد غدًا 🌙");
   await action(chat_id, voice ? "record_voice" : "typing");
   const history = recent(state);
+  const voiceSmallTalk = Boolean(voice && text.length <= 90 && /^(?:هلا|هلو|السلام|سلام|شلونك|شخبارك|شلونكم|شخباركم|صباح الخير|مساء الخير|هاي|hello|hi)(?:\s|$|[؟?!.,،])/iu.test(String(text).trim()));
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
-  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. خلي الرد من جملتين إلى أربع جمل قصيرة، وبفواصل ونقاط طبيعية حتى النطق يطلع واضح. لا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
+  const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. إذا كلام المستخدم مجرد تحية أو سوالف قصيرة مثل «شلونك شخبارك»، رد بجملة عراقية وحدة قصيرة جدًا من 4 إلى 12 كلمة. إذا يحتاج جواب عادي خليها جملة أو جملتين، وإذا يحتاج شرح فعلي لا تتجاوز ثلاث جمل قصيرة. استخدم فواصل ونقاط طبيعية بالنص، ولا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
-  let answer = "";
+  let answer = voiceSmallTalk
+    ? (/السلام|سلام/u.test(String(text)) ? "وعليكم السلام هلا بيك عيني شلونك شخبارك" : "هلا عيني الحمد لله زين وإنت شلونك شخبارك")
+    : "";
   try {
-    if (!directConfigured().length) throw new Error("no direct");
+    if (!answer && !directConfigured().length) throw new Error("no direct");
     const factual = needsSearch(text);
     // رد سريع: البصمة (لازم تكون فورية) والسوالف القصيرة — نموذج سريع واحد بدل انتظار كل النماذج
     const quick = provider === "auto" && !factual && (voice || (text.length < 60 && !/\n/.test(text)));
-    if (quick) {
-      try { answer = await directText(messages, { max_tokens: voice ? 220 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
+    if (!answer && quick) {
+      try { answer = await directText(messages, { max_tokens: voiceSmallTalk ? 60 : voice ? 140 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
       catch (e) { console.error("quick", e.message); }
     }
     // سؤال عن حقيقة بالبصمة: نجاوب من البحث مباشرة (أسرع من تجميع كل النماذج)
@@ -188,15 +192,20 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
     if (!answer && provider === "auto" && needsSearch(text)) {
       try { answer = (await searchAnswer(text, { history })).text; } catch (e) { console.error("search", e.message); }
     }
-    if (!answer) answer = await directText(messages, { max_tokens: voice ? 240 : 4096, timeout: 60_000, provider });
+    if (!answer) answer = await directText(messages, { max_tokens: voiceSmallTalk ? 70 : voice ? 160 : 4096, timeout: 60_000, provider });
   } catch {
-    const r = await gateway("/api/chat", { messages, max_tokens: voice ? 240 : 4096 });
+    const r = await gateway("/api/chat", { messages, max_tokens: voiceSmallTalk ? 70 : voice ? 160 : 4096 });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return send(chat_id, "صار خلل بالنماذج، جرّب بعد شوية 🙏");
     answer = d.text || "";
   }
   answer = String(answer).replace(/^\s*\[[^\]\n]{3,300}\]\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim() || answer; // ما نخلي النموذج يدّعي إنه سوى شي
-  if (voice && answer.length > 700) {
+  if (voiceSmallTalk) {
+    const oneLine = answer.replace(/\s+/g, " ").trim();
+    const firstSentence = oneLine.split(/[.!؟!]/u).find(Boolean)?.trim() || oneLine;
+    answer = firstSentence.split(/\s+/).slice(0, 14).join(" ");
+  }
+  if (voice && answer.length > 420) {
     const head = answer.slice(0, 700);
     const cut = Math.max(head.lastIndexOf("."), head.lastIndexOf("؟"), head.lastIndexOf("!"), head.lastIndexOf("،"));
     answer = (cut > 300 ? head.slice(0, cut + 1) : head).trim();
@@ -205,8 +214,8 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   if (voice) {
     try {
       await action(chat_id, "record_voice");
-      const { audio } = await speak(answer, voice);
-      await sendVoice(chat_id, audio);
+      const { audio, duration } = await speak(answer, voice);
+      await sendVoice(chat_id, audio, "", duration);
       spoken = true;
     } catch (e) {
       console.error("voice reply", e.message);
@@ -253,8 +262,8 @@ async function doVision(chat_id, user, state, img, text, { voice } = {}) {
   let spoken = false;
   if (voice) {
     try {
-      const { audio } = await speak(answer, voice);
-      await sendVoice(chat_id, audio);
+      const { audio, duration } = await speak(answer, voice);
+      await sendVoice(chat_id, audio, "", duration);
       spoken = true;
     } catch (e) {
       console.error("voice reply", e.message);

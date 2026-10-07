@@ -27,6 +27,78 @@ export function prepareIraqiTTS(text) {
   return s;
 }
 
+// Haider currently behaves reliably when punctuation is removed from the text sent to Sawtak.
+// Keep punctuation in the LLM answer, but synthesize a plain-space version.
+export function prepareSawtakInput(text) {
+  return prepareIraqiTTS(text)
+    .replace(/[.!?,،؛;:؟…]+/gu, " ")
+    .replace(/[\-–—]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function cleanSawtakPcm(audio, sampleRate = 24000, {
+  paddingMs = 180,
+  targetPeak = 24000,
+  maxGain = 12,
+} = {}) {
+  const bytes = audio instanceof Uint8Array ? audio : new Uint8Array(audio || 0);
+  const count = Math.floor(bytes.byteLength / 2);
+  if (!count || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    throw new Error("Sawtak PCM is empty");
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, count * 2);
+  let peak = 0;
+  for (let i = 0; i < count; i++) peak = Math.max(peak, Math.abs(view.getInt16(i * 2, true)));
+  if (!peak) throw new Error("Sawtak PCM contains only silence");
+
+  // Adaptive threshold: high enough to ignore Sawtak's padded near-zero tail,
+  // low enough to preserve soft consonants at the beginning/end of Iraqi speech.
+  const threshold = Math.max(20, Math.min(160, Math.round(peak * 0.035)));
+  let first = -1, last = -1;
+  for (let i = 0; i < count; i++) {
+    if (Math.abs(view.getInt16(i * 2, true)) >= threshold) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first < 0 || last < first) throw new Error("Sawtak PCM has no audible speech");
+
+  const pad = Math.round(sampleRate * Math.max(0, paddingMs) / 1000);
+  const start = Math.max(0, first - pad);
+  const end = Math.min(count, last + pad + 1);
+  const gain = Math.max(1, Math.min(maxGain, targetPeak / peak));
+
+  const out = new ArrayBuffer((end - start) * 2);
+  const outView = new DataView(out);
+  let peakAfter = 0;
+  for (let i = start, j = 0; i < end; i++, j++) {
+    const value = Math.max(-32768, Math.min(32767, Math.round(view.getInt16(i * 2, true) * gain)));
+    outView.setInt16(j * 2, value, true);
+    peakAfter = Math.max(peakAfter, Math.abs(value));
+  }
+
+  return {
+    pcm: new Uint8Array(out),
+    duration: (end - start) / sampleRate,
+    rawDuration: count / sampleRate,
+    gain,
+    peakBefore: peak,
+    peakAfter,
+  };
+}
+
+export function splitSawtakWords(text, maxWords = 4) {
+  const clean = prepareSawtakInput(text);
+  if (!clean) return [];
+  const words = clean.split(/\s+/).filter(Boolean);
+  const size = Math.max(2, Math.min(6, Number(maxWords) || 4));
+  const out = [];
+  for (let i = 0; i < words.length; i += size) out.push(words.slice(i, i + size).join(" "));
+  return out;
+}
+
 export function splitIraqiTTS(text, maxChars = 260) {
   const clean = prepareIraqiTTS(text);
   if (!clean) return [];
@@ -121,7 +193,7 @@ export async function sawtakHaiderVoiceId({ timeout = 10_000 } = {}) {
 export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
   const key = apiKey();
   if (!key) throw new Error("SAWTAK_API_KEY not set");
-  const input = prepareIraqiTTS(text);
+  const input = prepareSawtakInput(text);
   if (!input) throw new Error("Sawtak TTS text is empty");
 
   const voice = await sawtakHaiderVoiceId({ timeout: Math.min(timeout, 10_000) });
@@ -140,11 +212,25 @@ export async function sawtakTTSRaw(text, { timeout = 45_000 } = {}) {
     }),
     signal: AbortSignal.timeout(timeout),
   });
-  if (!r.ok) throw new Error(`sawtak tts HTTP ${r.status}: ${await errorText(r)}`);
+  if (!r.ok) {
+    const err = new Error(`sawtak tts HTTP ${r.status}: ${await errorText(r)}`);
+    err.status = r.status;
+    const retryAfter = Number(r.headers.get("retry-after") || 0);
+    err.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
+    throw err;
+  }
   const sampleRate = Number(r.headers.get("x-sample-rate") || 24000);
-  const pcm = new Uint8Array(await r.arrayBuffer());
-  if (!pcm.byteLength) throw new Error("sawtak tts: empty audio");
-  return { pcm, sampleRate, voice };
+  const rawPcm = new Uint8Array(await r.arrayBuffer());
+  if (!rawPcm.byteLength) throw new Error("sawtak tts: empty audio");
+  const cleaned = cleanSawtakPcm(rawPcm, sampleRate);
+  console.log("sawtak audio", {
+    rawSeconds: Number(cleaned.rawDuration.toFixed(2)),
+    seconds: Number(cleaned.duration.toFixed(2)),
+    gain: Number(cleaned.gain.toFixed(2)),
+    peakBefore: cleaned.peakBefore,
+    peakAfter: cleaned.peakAfter,
+  });
+  return { pcm: cleaned.pcm, sampleRate, voice, duration: cleaned.duration, rawDuration: cleaned.rawDuration };
 }
 
 function extForMime(mime) {
@@ -182,43 +268,57 @@ export async function sawtakTranscribe(audio, mime = "audio/ogg", { timeout = 45
 }
 
 
-export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, maxChars = 900 } = {}) {
-  const chunks = splitIraqiTTS(text, maxChars);
+export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 3, maxWords = 4, concurrency = 2 } = {}) {
+  const chunks = splitSawtakWords(text, maxWords);
   if (!chunks.length) throw new Error("Sawtak TTS text is empty");
 
-  const parts = [];
-  let sampleRate = 24000;
-  let voice = DEFAULT_HAIDER_VOICE_ID;
-
-  for (const chunk of chunks) {
-    let result = null;
+  const synthOne = async (chunk) => {
     let lastError = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        result = await sawtakTTSRaw(chunk, { timeout });
-        break;
+        const result = await sawtakTTSRaw(chunk, { timeout });
+        const words = chunk.split(/\s+/).filter(Boolean).length;
+        const minSeconds = Math.max(0.65, words * 0.28);
+        if (result.rawDuration > 30 && result.duration < minSeconds) {
+          throw new Error(`Sawtak truncated chunk: ${result.duration.toFixed(2)}s for ${words} words`);
+        }
+        return result;
       } catch (e) {
         lastError = e;
-        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 350));
+        if (attempt < retries) {
+          const waitMs = e?.status === 429
+            ? Math.max(e.retryAfterMs || 0, Math.min(20_000, 3000 * (2 ** attempt)))
+            : 650 * (attempt + 1);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
       }
     }
-    if (!result) throw lastError || new Error("Sawtak TTS failed");
-    sampleRate = result.sampleRate || sampleRate;
-    voice = result.voice || voice;
-    parts.push(result.pcm);
+    throw lastError || new Error("Sawtak TTS failed");
+  };
+
+  // Keep the burst small even if the provider allows more concurrency:
+  // this avoids account-level 429s while still synthesizing a greeting quickly.
+  const parts = [];
+  const batchSize = Math.max(1, Math.min(2, Number(concurrency) || 2));
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const batch = await Promise.all(chunks.slice(i, i + batchSize).map(synthOne));
+    parts.push(...batch);
   }
 
-  const silence = new Uint8Array(Math.round(sampleRate * 0.12) * 2);
-  const total = parts.reduce((n, p) => n + p.byteLength, 0) + Math.max(0, parts.length - 1) * silence.byteLength;
+  const sampleRate = parts[0]?.sampleRate || 24000;
+  const voice = parts[0]?.voice || DEFAULT_HAIDER_VOICE_ID;
+  const silence = new Uint8Array(Math.round(sampleRate * 0.10) * 2);
+  const total = parts.reduce((n, p) => n + p.pcm.byteLength, 0) + Math.max(0, parts.length - 1) * silence.byteLength;
   const pcm = new Uint8Array(total);
   let offset = 0;
-  parts.forEach((part, i) => {
-    pcm.set(part, offset);
-    offset += part.byteLength;
+  for (let i = 0; i < parts.length; i++) {
+    pcm.set(parts[i].pcm, offset);
+    offset += parts[i].pcm.byteLength;
     if (i < parts.length - 1) {
       pcm.set(silence, offset);
       offset += silence.byteLength;
     }
-  });
-  return { pcm, sampleRate, voice };
+  }
+
+  return { pcm, sampleRate, voice, duration: pcm.byteLength / 2 / sampleRate, chunks: chunks.length };
 }
