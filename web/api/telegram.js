@@ -167,13 +167,15 @@ async function doChat(chat_id, user, state, text, { voice, provider = "auto" } =
   // البصمة: الرد ينقرى بصوت، فلازم يكون كلام محكي بنفس لهجة المتكلم
   const system = voice ? `${SYSTEM}\nالمستخدم دزلك بصمة صوتية وردك راح يتحول لصوت حيدر. احچي عراقي عامي طبيعي فقط، وممنوع تستخدم الفصحى إلا إذا أكو اسم علمي أو تقني ما إله بديل دارج. لا تستخدم تعابير مثل: سأفعل، يمكنك، ماذا تريد، بالتأكيد، لا بأس، سوف، أريد أن أوضح، من فضلك. استبدلها بحچي عراقي مثل: أسويلك، تگدر، شتريد، إي، عادي، هسه، خل أوضحلك، گلي. إذا كلام المستخدم مجرد تحية أو سوالف قصيرة مثل «شلونك شخبارك»، رد بجملة عراقية وحدة قصيرة جدًا من 4 إلى 12 كلمة. إذا يحتاج جواب عادي خليها جملة أو جملتين، وإذا يحتاج شرح فعلي لا تتجاوز ثلاث جمل قصيرة. استخدم فواصل ونقاط طبيعية بالنص، ولا تمدد الحروف، لا تكرر الكلمات، ولا تستخدم إيموجي أو روابط أو كود.` : SYSTEM;
   const messages = [{ role: "system", content: system }, ...history, { role: "user", content: text }];
-  let answer = "";
+  let answer = voiceSmallTalk
+    ? (/السلام|سلام/u.test(String(text)) ? "وعليكم السلام هلا بيك عيني شلونك شخبارك" : "هلا عيني الحمد لله زين وإنت شلونك شخبارك")
+    : "";
   try {
-    if (!directConfigured().length) throw new Error("no direct");
+    if (!answer && !directConfigured().length) throw new Error("no direct");
     const factual = needsSearch(text);
     // رد سريع: البصمة (لازم تكون فورية) والسوالف القصيرة — نموذج سريع واحد بدل انتظار كل النماذج
     const quick = provider === "auto" && !factual && (voice || (text.length < 60 && !/\n/.test(text)));
-    if (quick) {
+    if (!answer && quick) {
       try { answer = await directText(messages, { max_tokens: voiceSmallTalk ? 60 : voice ? 140 : 1500, timeout: 15_000, prefer: DIRECT.find((p) => p.id === "gemini")?.lite }); }
       catch (e) { console.error("quick", e.message); }
     }
