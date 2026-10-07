@@ -3,7 +3,7 @@
 // واحتياط: صوت Google Translate.
 import { createHash, randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import { Mp3Encoder } from "@breezystack/lamejs";
+import { Mp3Encoder } from "@breezystack/lamejs";\nimport { sawtakTTSRaw, sawtakTranscribe } from "./_sawtak.js";
 // مفاتيح Gemini إضافية (GEMINI_API_KEY_2…_5): كل مفتاح من مشروع Google منفصل = حصة مجانية يومية منفصلة
 {
   const all = [process.env.GEMINI_API_KEY, ...[2, 3, 4, 5].map((n) => process.env[`GEMINI_API_KEY_${n}`])]
