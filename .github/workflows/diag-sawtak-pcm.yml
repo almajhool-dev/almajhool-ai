@@ -37,4 +37,43 @@ jobs:
             }
             console.log(`TH=${threshold} FIRST=${first} LAST=${last} START_S=${first<0?-1:(first*.02).toFixed(2)} END_S=${last<0?-1:((last+1)*.02).toFixed(2)} ACTIVE_W=${active}`);
           }
+          const text = "وعليكم السلام، هلا بيك عيني، الحمد لله زين. إنت شلونك شخبارك؟";
+          const key = process.env.SAWTAK_API_KEY;
+          for (const format of ["wav","mp3"]) {
+            const resp = await fetch("https://api.sawtakarabi.ai/v1/audio/speech", {
+              method:"POST",
+              headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},
+              body:JSON.stringify({model:"arabic-tts-1",voice:"380ef7b6-ffea-52fd-89bd-d661a9b01bcc",input:text,response_format:format,sample_rate:24000,normalize_text:true,enhance_pronunciation:true,temperature:0.35}),
+              signal:AbortSignal.timeout(90000),
+            });
+            const bytes=new Uint8Array(await resp.arrayBuffer());
+            console.log(`FORMAT=${format} HTTP=${resp.status} TYPE=${resp.headers.get("content-type")} BYTES=${bytes.length} HEAD=${Buffer.from(bytes.slice(0,16)).toString("hex")}`);
+            if(format==="wav" && resp.ok && bytes.length>44){
+              const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+              const riff=Buffer.from(bytes.slice(0,4)).toString("ascii");
+              const rate=dv.getUint32(24,true);
+              const bits=dv.getUint16(34,true);
+              let off=12, dataOff=-1, dataSize=0;
+              while(off+8<=bytes.length){
+                const id=Buffer.from(bytes.slice(off,off+4)).toString("ascii");
+                const size=dv.getUint32(off+4,true);
+                if(id==="data"){dataOff=off+8;dataSize=Math.min(size,bytes.length-dataOff);break;}
+                off += 8 + size + (size%2);
+              }
+              console.log(`WAV_RIFF=${riff} RATE=${rate} BITS=${bits} DATA=${dataSize} SECONDS=${dataOff>=0?(dataSize/(rate*(bits/8))).toFixed(3):"?"}`);
+              if(dataOff>=0 && bits===16){
+                const samples=Math.floor(dataSize/2), win=Math.round(rate*.02);
+                for(const th of [20,40,80]){
+                  let first=-1,last=-1;
+                  for(let st=0,w=0;st<samples;st+=win,w++){
+                    let peak=0,sum2=0,n=Math.min(win,samples-st);
+                    for(let i=0;i<n;i++){const x=dv.getInt16(dataOff+(st+i)*2,true);peak=Math.max(peak,Math.abs(x));sum2+=x*x;}
+                    const rms=Math.sqrt(sum2/n);
+                    if(rms>=th||peak>=th*5){if(first<0)first=w;last=w;}
+                  }
+                  console.log(`WAV_TH=${th} START=${first<0?-1:(first*.02).toFixed(2)} END=${last<0?-1:((last+1)*.02).toFixed(2)}`);
+                }
+              }
+            }
+          }
           NODE
