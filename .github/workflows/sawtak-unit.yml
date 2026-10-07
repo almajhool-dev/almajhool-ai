@@ -1,0 +1,23 @@
+name: Sawtak Haider voice unit
+
+on:
+  push:
+    branches: ["feature/sawtak-haider-telegram"]
+    paths:
+      - "web/api/_voice.js"
+      - "web/api/_voice.sawtak.test.mjs"
+      - ".github/workflows/sawtak-unit.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Sawtak voice unit tests
+        run: node --test api/_voice.sawtak.test.mjs
+        working-directory: web
