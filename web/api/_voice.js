@@ -181,12 +181,24 @@ const TTS_STYLE = {
   msa: "Speak clear Modern Standard Arabic, warm and natural",
   english: "Speak in a natural, friendly American English voice",
 };
-function pcmToMp3(pcm, rate = 24000) {
-  const samples = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
+export function pcmToMp3(pcm, rate = 24000) {
+  const src = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
+  if (!src.length) throw new Error("pcm is empty");
+  // Sawtak raw PCM can be quiet. Normalize once before MP3 encoding so Telegram
+  // does not sound loud for the first word and nearly silent afterwards.
+  let peak = 0;
+  for (let i = 0; i < src.length; i++) peak = Math.max(peak, Math.abs(src[i]));
+  const gain = peak > 0 ? Math.min(4, 28500 / peak) : 1;
+  const samples = gain > 1.05 ? Int16Array.from(src, (x) => Math.max(-32768, Math.min(32767, Math.round(x * gain)))) : src;
   const enc = new Mp3Encoder(1, rate, 64), out = [];
-  for (let i = 0; i < samples.length; i += 1152) { const b = enc.encodeBuffer(samples.subarray(i, i + 1152)); if (b.length) out.push(Buffer.from(b)); }
+  for (let i = 0; i < samples.length; i += 1152) {
+    const b = enc.encodeBuffer(samples.subarray(i, i + 1152));
+    if (b.length) out.push(Buffer.from(b));
+  }
   const end = enc.flush(); if (end.length) out.push(Buffer.from(end));
-  return Buffer.concat(out);
+  const audio = Buffer.concat(out);
+  if (!audio.length) throw new Error("mp3 encode produced empty audio");
+  return audio;
 }
 const ttsGone = new Set();
 // أي حد خلص بالضبط (باليوم لو بالدقيقة) — حتى نعرف السبب من السجل
@@ -226,10 +238,10 @@ export const normalizeForTTS = (t) => String(t).replace(/گ/g, "ك").replace(/چ
 
 /** يرجع MP3 (Buffer) للنص بصوت مناسب للهجة */
 export async function speak(text, dialect = "iraqi") {
-  const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, 2500);
+  const clean = String(text).replace(/[*_#`>|]/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim().slice(0, dialect === "iraqi" ? 420 : 2500);
   if (!clean) throw new Error("نص فارغ");
   if (dialect === "iraqi" && process.env.SAWTAK_API_KEY) {
-    const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 75_000, retries: 1, maxChars: 900 });
+    const { pcm, sampleRate } = await sawtakTTSJoined(clean, { timeout: 75_000, retries: 1, maxChars: 500 });
     return { audio: pcmToMp3(pcm, sampleRate), voice: "sawtak/haider" };
   }
   // الأصوات القديمة تبقى احتياط فقط إذا Sawtak غير مفعّل أصلًا.
