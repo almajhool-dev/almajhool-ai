@@ -1,0 +1,40 @@
+name: Diagnose Sawtak PCM activity
+
+on:
+  push:
+    branches: ["fix/trim-sawtak-pcm"]
+    paths: [".github/workflows/diag-sawtak-pcm.yml"]
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Measure active PCM windows
+        working-directory: web
+        run: |
+          node --input-type=module <<'NODE'
+          import { sawtakTTSRaw } from "./api/_sawtak.js";
+          const r = await sawtakTTSRaw("وعليكم السلام، هلا بيك عيني، الحمد لله زين. إنت شلونك شخبارك؟", { timeout: 90000 });
+          const pcm = r.pcm, rate = r.sampleRate;
+          const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+          const winSamples = Math.round(rate * 0.02);
+          const totalSamples = Math.floor(pcm.byteLength / 2);
+          for (const threshold of [20,40,60,80,100,150,200]) {
+            let first=-1,last=-1,active=0;
+            for(let start=0,w=0; start<totalSamples; start+=winSamples,w++){
+              let peak=0, sum2=0, n=Math.min(winSamples,totalSamples-start);
+              for(let i=0;i<n;i++){
+                const s=view.getInt16((start+i)*2,true);
+                const a=Math.abs(s); if(a>peak) peak=a; sum2+=s*s;
+              }
+              const rms=Math.sqrt(sum2/n);
+              if(rms>=threshold || peak>=threshold*5){ if(first<0) first=w; last=w; active++; }
+            }
+            console.log(`TH=${threshold} FIRST=${first} LAST=${last} START_S=${first<0?-1:(first*.02).toFixed(2)} END_S=${last<0?-1:((last+1)*.02).toFixed(2)} ACTIVE_W=${active}`);
+          }
+          NODE
