@@ -89,6 +89,16 @@ export function cleanSawtakPcm(audio, sampleRate = 24000, {
   };
 }
 
+export function splitSawtakWords(text, maxWords = 4) {
+  const clean = prepareSawtakInput(text);
+  if (!clean) return [];
+  const words = clean.split(/\s+/).filter(Boolean);
+  const size = Math.max(2, Math.min(6, Number(maxWords) || 4));
+  const out = [];
+  for (let i = 0; i < words.length; i += size) out.push(words.slice(i, i + size).join(" "));
+  return out;
+}
+
 export function splitIraqiTTS(text, maxChars = 260) {
   const clean = prepareIraqiTTS(text);
   if (!clean) return [];
@@ -252,43 +262,50 @@ export async function sawtakTranscribe(audio, mime = "audio/ogg", { timeout = 45
 }
 
 
-export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, maxChars = 900 } = {}) {
-  const chunks = splitIraqiTTS(text, maxChars);
+export async function sawtakTTSJoined(text, { timeout = 75_000, retries = 1, maxWords = 4 } = {}) {
+  const chunks = splitSawtakWords(text, maxWords);
   if (!chunks.length) throw new Error("Sawtak TTS text is empty");
 
-  const parts = [];
-  let sampleRate = 24000;
-  let voice = DEFAULT_HAIDER_VOICE_ID;
-
-  for (const chunk of chunks) {
-    let result = null;
+  const synthOne = async (chunk) => {
     let lastError = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        result = await sawtakTTSRaw(chunk, { timeout });
-        break;
+        const result = await sawtakTTSRaw(chunk, { timeout });
+        const words = chunk.split(/\s+/).filter(Boolean).length;
+        const minSeconds = Math.max(0.65, words * 0.28);
+        if (result.rawDuration > 30 && result.duration < minSeconds) {
+          throw new Error(`Sawtak truncated chunk: ${result.duration.toFixed(2)}s for ${words} words`);
+        }
+        return result;
       } catch (e) {
         lastError = e;
-        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 350));
+        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 450 * (attempt + 1)));
       }
     }
-    if (!result) throw lastError || new Error("Sawtak TTS failed");
-    sampleRate = result.sampleRate || sampleRate;
-    voice = result.voice || voice;
-    parts.push(result.pcm);
+    throw lastError || new Error("Sawtak TTS failed");
+  };
+
+  // Sawtak's documented account concurrency is 5. Keep at most 5 short chunks in flight.
+  const parts = [];
+  for (let i = 0; i < chunks.length; i += 5) {
+    const batch = await Promise.all(chunks.slice(i, i + 5).map(synthOne));
+    parts.push(...batch);
   }
 
-  const silence = new Uint8Array(Math.round(sampleRate * 0.12) * 2);
-  const total = parts.reduce((n, p) => n + p.byteLength, 0) + Math.max(0, parts.length - 1) * silence.byteLength;
+  const sampleRate = parts[0]?.sampleRate || 24000;
+  const voice = parts[0]?.voice || DEFAULT_HAIDER_VOICE_ID;
+  const silence = new Uint8Array(Math.round(sampleRate * 0.10) * 2);
+  const total = parts.reduce((n, p) => n + p.pcm.byteLength, 0) + Math.max(0, parts.length - 1) * silence.byteLength;
   const pcm = new Uint8Array(total);
   let offset = 0;
-  parts.forEach((part, i) => {
-    pcm.set(part, offset);
-    offset += part.byteLength;
+  for (let i = 0; i < parts.length; i++) {
+    pcm.set(parts[i].pcm, offset);
+    offset += parts[i].pcm.byteLength;
     if (i < parts.length - 1) {
       pcm.set(silence, offset);
       offset += silence.byteLength;
     }
-  });
-  return { pcm, sampleRate, voice };
+  }
+
+  return { pcm, sampleRate, voice, duration: pcm.byteLength / 2 / sampleRate, chunks: chunks.length };
 }
