@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 process.env.SAWTAK_API_KEY = "test-key";
 
 const sawtak = await import("./_sawtak.js");
-const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS } = sawtak;
+const { sawtakVoiceIdFromList, sawtakTTSRaw, sawtakTranscribe, prepareIraqiTTS, splitIraqiTTS } = sawtak;
 
 test("selects the ready Haider Iraqi voice", () => {
   const id = sawtakVoiceIdFromList({
@@ -83,4 +83,13 @@ test("prepares Iraqi speech text for clear pacing", () => {
   assert.ok(out.includes("، "));
   assert.ok(out.endsWith("."));
   assert.ok(!out.includes("وووو"));
+});
+
+
+test("splits long Iraqi replies into short speech chunks", () => {
+  const text = "هلو عيني شلونك اليوم؟ آني حاضر وياك وكلشي تمام. إذا تريد أي شي گلي وأنا أساعدك هسه بدون ما أطول عليك بالحچي.";
+  const chunks = splitIraqiTTS(text, 55);
+  assert.ok(chunks.length >= 2);
+  assert.ok(chunks.every((part) => part.length <= 55));
+  assert.equal(chunks.join(" ").replace(/\s+/g, " ").trim(), prepareIraqiTTS(text).replace(/\s+/g, " ").trim());
 });
