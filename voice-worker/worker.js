@@ -134,11 +134,18 @@ async function downloadVoice(token, id) {
   if (!r.ok) throw new Error("voice download " + r.status);
   return new Uint8Array(await r.arrayBuffer());
 }
+function toBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
 async function transcribeGemini(audio, env) {
   const keys = [env.GEMINI_API_KEY, env.GEMINI_API_KEY_2, env.GEMINI_API_KEY_3, env.GEMINI_API_KEY_4]
     .flatMap((x) => String(x || "").split(/[\s,]+/)).filter(Boolean);
   if (!keys.length) throw new Error("Gemini key missing");
-  const data = btoa(String.fromCharCode(...audio));
+  const data = toBase64(audio);
   const models = ["gemini-flash-latest", "gemini-2.5-flash"];
   const prompt = 'رجّع JSON فقط: {"transcript":"..."} واكتب الكلام مثل ما انحچى باللهجة نفسها بدون تحويله للفصحى.';
   const errors = [];
