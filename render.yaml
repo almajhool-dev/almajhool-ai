@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: almajhool-voice-bridge
+    runtime: node
+    rootDir: render-bot
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npm start
+    healthCheckPath: /health
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SAWTAK_API_KEY
+        sync: false

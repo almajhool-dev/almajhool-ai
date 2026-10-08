@@ -1,0 +1,29 @@
+name: Render voice bridge tests
+on:
+  push:
+    branches: ["feat/render-voice-bridge"]
+    paths:
+      - "render-bot/**"
+      - "render.yaml"
+      - ".github/workflows/render-voice-bridge.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "render-bot/**"
+      - "render.yaml"
+      - ".github/workflows/render-voice-bridge.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+        working-directory: render-bot
+      - run: npm test
+        working-directory: render-bot
+      - run: |
+          node --check bridge.mjs
+          node --check server.mjs
+        working-directory: render-bot
