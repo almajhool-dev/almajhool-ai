@@ -1,0 +1,8 @@
+{
+  "name": "almajhool-cloudflare-voice-bot",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7"
+  }
+}
