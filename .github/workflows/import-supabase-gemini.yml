@@ -1,0 +1,42 @@
+name: Import Gemini secrets to Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/import-supabase-gemini.yml"
+  workflow_dispatch:
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+      GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+      GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+    steps:
+      - name: Import keys without exposing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN missing"
+            exit 1
+          fi
+          SECRET=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+          jq -n \
+            --arg k1 "${GEMINI_API_KEY:-}" \
+            --arg k2 "${GEMINI_API_KEY_2:-}" \
+            --arg k3 "${GEMINI_API_KEY_3:-}" \
+            --arg k4 "${GEMINI_API_KEY_4:-}" \
+            '{GEMINI_API_KEY:$k1,GEMINI_API_KEY_2:$k2,GEMINI_API_KEY_3:$k3,GEMINI_API_KEY_4:$k4}' \
+            > "$RUNNER_TEMP/gemini.json"
+          curl -fsS \
+            -H "x-import-token: $SECRET" \
+            -H "content-type: application/json" \
+            --data-binary @"$RUNNER_TEMP/gemini.json" \
+            "https://shmmzjqcguoaohdnnwun.supabase.co/functions/v1/import-bot-secrets" \
+            | jq -c .
+          rm -f "$RUNNER_TEMP/gemini.json"
