@@ -10,7 +10,7 @@ name: Deploy (Cloudflare gateway + Vercel site)
 on:
   push:
     branches: [main]
-    paths: ["gateway/**", "web/**", ".github/workflows/deploy.yml"]
+    paths: ["gateway/**", "voice-worker/**", "web/**", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 concurrency:
@@ -79,6 +79,54 @@ jobs:
             npx --yes wrangler@4 secret bulk "$RUNNER_TEMP/keys.json"
           else echo "No provider keys yet — gateway keeps using its keyless sources"; fi
           rm -f "$RUNNER_TEMP/keys.json"
+
+      - name: Deploy Telegram voice bot to Cloudflare
+        if: steps.check.outputs.ok == 'true'
+        working-directory: voice-worker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$SAWTAK_API_KEY" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN or SAWTAK_API_KEY missing"
+            exit 1
+          fi
+
+          npm install --no-audit --no-fund
+          node --test worker.test.mjs
+
+          npx --yes wrangler@4 deploy 2>&1 | tee "$RUNNER_TEMP/voice-worker-deploy.log"
+
+          echo '{}' > "$RUNNER_TEMP/voice-secrets.json"
+          for K in TELEGRAM_BOT_TOKEN SAWTAK_API_KEY GEMINI_API_KEY GEMINI_API_KEY_2 GEMINI_API_KEY_3 GEMINI_API_KEY_4; do
+            V="${!K}"
+            if [ -n "$V" ]; then
+              jq --arg k "$K" --arg v "$V" '. + {($k): $v}' "$RUNNER_TEMP/voice-secrets.json" > "$RUNNER_TEMP/voice.tmp"
+              mv "$RUNNER_TEMP/voice.tmp" "$RUNNER_TEMP/voice-secrets.json"
+            fi
+          done
+          npx --yes wrangler@4 secret bulk "$RUNNER_TEMP/voice-secrets.json"
+          rm -f "$RUNNER_TEMP/voice-secrets.json"
+
+          URL=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/voice-worker-deploy.log" | tail -1)
+          if [ -z "$URL" ]; then
+            echo "::error::Could not detect workers.dev URL"
+            exit 1
+          fi
+          echo "Voice worker: $URL"
+
+          SECRET=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+          API="https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN"
+          curl -fsS "$API/setWebhook" -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$URL/telegram\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\"],\"drop_pending_updates\":false}" \
+            | jq -c '{ok,description}'
+          curl -fsS "$API/getWebhookInfo" | jq -c '.result | {url,pending_update_count,last_error_message}'
+          curl -fsS "$URL/health" | jq -c .
 
   site:
     runs-on: ubuntu-latest
