@@ -1,0 +1,28 @@
+name: Bootstrap Supabase Telegram bot
+on:
+  push:
+    branches: ["bootstrap/supabase-telegram-bot"]
+    paths: [".github/workflows/bootstrap-supabase-bot.yml"]
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      SAWTAK_API_KEY: ${{ secrets.SAWTAK_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Check required secrets
+        run: |
+          set -euo pipefail
+          test -n "$TELEGRAM_BOT_TOKEN" || { echo "::error::TELEGRAM_BOT_TOKEN missing"; exit 1; }
+          test -n "$SAWTAK_API_KEY" || { echo "::error::SAWTAK_API_KEY missing"; exit 1; }
+
+      - name: Bootstrap Supabase function and Telegram webhook
+        run: |
+          set -euo pipefail
+          jq -n             --arg telegram "$TELEGRAM_BOT_TOKEN"             --arg sawtak "$SAWTAK_API_KEY"             --arg gemini "$GEMINI_API_KEY"             '{telegram_bot_token:$telegram,sawtak_api_key:$sawtak,gemini_api_key:$gemini}'           | curl --fail-with-body --silent --show-error               -H 'Content-Type: application/json'               --data-binary @-               'https://uuzmgsshnwbxrwkbwtvr.supabase.co/functions/v1/telegram-bot/setup'           | jq -c '{ok,bot,webhook,pending_update_count,last_error_message}'
+
+      - name: Check health
+        run: |
+          curl --fail --silent --show-error             'https://uuzmgsshnwbxrwkbwtvr.supabase.co/functions/v1/telegram-bot/health'           | jq -c .
