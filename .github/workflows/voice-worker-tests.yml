@@ -1,0 +1,28 @@
+name: Voice worker tests
+on:
+  push:
+    branches: ["feat/cloudflare-voice-bot"]
+    paths:
+      - "voice-worker/**"
+      - ".github/workflows/voice-worker-tests.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "voice-worker/**"
+      - ".github/workflows/voice-worker-tests.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install
+        working-directory: voice-worker
+        run: npm install --no-audit --no-fund
+      - name: Unit tests
+        working-directory: voice-worker
+        run: node --test worker.test.mjs
+      - name: Wrangler dry run
+        working-directory: voice-worker
+        run: npx --yes wrangler@4 deploy --dry-run
